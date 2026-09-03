@@ -1,0 +1,145 @@
+import SwiftUI
+
+struct ProvidersSettingsView: View {
+    @Environment(ProviderStore.self) private var store
+    @State private var apiKeyInput = ""
+    @State private var isKeyVisible = false
+    @State private var testStatus: TestStatus = .idle
+
+    var body: some View {
+        Form {
+            providerSection
+            apiKeySection
+            connectionSection
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var providerSection: some View {
+        Section("Provider") {
+            Picker("AI Provider", selection: Binding(
+                get: { store.activeProviderID },
+                set: {
+                    store.setActiveProvider($0)
+                    resetInputState()
+                }
+            )) {
+                ForEach(ProviderID.allCases, id: \.self) { id in
+                    Text(id.displayName).tag(id)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var apiKeySection: some View {
+        Section("API Key") {
+            HStack {
+                Group {
+                    if isKeyVisible {
+                        TextField("Paste API key...", text: $apiKeyInput)
+                    } else {
+                        SecureField("Paste API key...", text: $apiKeyInput)
+                    }
+                }
+                .textFieldStyle(.plain)
+
+                Button {
+                    isKeyVisible.toggle()
+                } label: {
+                    Image(systemName: isKeyVisible ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            HStack {
+                Button("Save") { saveKey() }
+                    .disabled(apiKeyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                Button("Clear", role: .destructive) { clearKey() }
+                    .disabled(!store.hasAPIKey(for: store.activeProviderID))
+
+                Spacer()
+
+                if store.hasAPIKey(for: store.activeProviderID) {
+                    Label("Key saved", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                } else {
+                    Label("Not configured", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var connectionSection: some View {
+        Section("Connection") {
+            Button("Test Connection") {
+                Task { await runConnectionTest() }
+            }
+            .disabled(!store.hasAPIKey(for: store.activeProviderID) || testStatus == .running)
+
+            switch testStatus {
+            case .idle:
+                EmptyView()
+            case .running:
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.65)
+                    Text("Testing…").foregroundStyle(.secondary).font(.caption)
+                }
+            case .success(let message):
+                Label(message, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green).font(.caption)
+            case .failure(let message):
+                Label(message, systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red).font(.caption)
+            }
+        }
+    }
+
+    private func resetInputState() {
+        apiKeyInput = ""
+        isKeyVisible = false
+        testStatus = .idle
+    }
+
+    private func saveKey() {
+        try? store.storeAPIKey(apiKeyInput, for: store.activeProviderID)
+        apiKeyInput = ""
+    }
+
+    private func clearKey() {
+        try? store.clearAPIKey(for: store.activeProviderID)
+    }
+
+    private func runConnectionTest() async {
+        testStatus = .running
+        guard let provider = store.makeProvider(for: store.activeProviderID) else {
+            testStatus = .failure("No API key configured.")
+            return
+        }
+        do {
+            let result = try await provider.transform(
+                text: "Hello",
+                instruction: "Reply with only the word 'OK' and nothing else."
+            )
+            testStatus = .success("Connected — \"\(result.prefix(60))\"")
+        } catch let error as AIError {
+            testStatus = .failure(error.localizedDescription)
+        } catch {
+            testStatus = .failure(error.localizedDescription)
+        }
+    }
+}
+
+private enum TestStatus: Equatable {
+    case idle
+    case running
+    case success(String)
+    case failure(String)
+}

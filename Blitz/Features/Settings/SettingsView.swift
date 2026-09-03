@@ -9,12 +9,8 @@ struct SettingsView: View {
             ScenariosSettingsView()
                 .tabItem { Label("Scenarios", systemImage: "list.bullet") }
 
-            ContentUnavailableView(
-                "Providers",
-                systemImage: "cpu",
-                description: Text("AI provider configuration will be available in Phase 3.")
-            )
-            .tabItem { Label("Providers", systemImage: "cpu") }
+            ProvidersSettingsView()
+                .tabItem { Label("Providers", systemImage: "cpu") }
         }
         .frame(width: 520, height: 400)
     }

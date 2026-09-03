@@ -34,6 +34,7 @@
 			children = (
 				833F732E3046A6490090C686 /* Blitz */,
 				833F732D3046A6490090C686 /* Products */,
+				83B439793049DEF400520C5C /* BlitzTests 2 */,
 			);
 			sourceTree = "<group>";
 		};
@@ -43,6 +44,13 @@
 				833F732C3046A6490090C686 /* Blitz.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		83B439793049DEF400520C5C /* BlitzTests 2 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = "BlitzTests 2";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

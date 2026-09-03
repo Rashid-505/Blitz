@@ -1,10 +1,3 @@
-//
-//  BlitzApp.swift
-//  Blitz
-//
-//  Created by Rashid Huseynov on 01.09.26.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -14,6 +7,8 @@ struct BlitzApp: App {
 
     private let sharedContainer: ModelContainer
     private let scenarioStore: ScenarioStore
+    private let providerStore: ProviderStore
+    private let orchestrator: TransformationOrchestrator
 
     init() {
         do {
@@ -22,12 +17,20 @@ struct BlitzApp: App {
             fatalError("SwiftData container failed to initialize: \(error)")
         }
         scenarioStore = ScenarioStore(modelContext: sharedContainer.mainContext)
+        providerStore = ProviderStore()
+        let textService = AccessibilityTextService()
+        orchestrator = TransformationOrchestrator(
+            textSelectionService: textService,
+            textReplacementService: textService
+        )
     }
 
     var body: some Scene {
         MenuBarExtra("Blitz", systemImage: "bolt.fill") {
             MenuBarView()
                 .environment(scenarioStore)
+                .environment(providerStore)
+                .environment(orchestrator)
         }
         .menuBarExtraStyle(.menu)
         .modelContainer(sharedContainer)
@@ -35,6 +38,7 @@ struct BlitzApp: App {
         Settings {
             SettingsView()
                 .environment(scenarioStore)
+                .environment(providerStore)
         }
         .modelContainer(sharedContainer)
     }

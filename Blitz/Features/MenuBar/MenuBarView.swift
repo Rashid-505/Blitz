@@ -4,8 +4,11 @@ import SwiftData
 struct MenuBarView: View {
     @Query(sort: \Scenario.order) private var scenarios: [Scenario]
     @Environment(\.openSettings) private var openSettings
+    @Environment(ProviderStore.self) private var providerStore
+    @Environment(TransformationOrchestrator.self) private var orchestrator
 
     var body: some View {
+        statusSection
         scenariosSection
 
         Divider()
@@ -29,6 +32,24 @@ struct MenuBarView: View {
     }
 
     @ViewBuilder
+    private var statusSection: some View {
+        switch orchestrator.state {
+        case .idle:
+            EmptyView()
+        case .transforming(let name):
+            Text("Running \(name)...")
+                .foregroundStyle(.secondary)
+            Button("Cancel") { orchestrator.cancel() }
+            Divider()
+        case .failed(let error):
+            Text(error.localizedDescription)
+                .foregroundStyle(.red)
+            Button("Dismiss") { orchestrator.cancel() }
+            Divider()
+        }
+    }
+
+    @ViewBuilder
     private var scenariosSection: some View {
         let enabled = scenarios.filter(\.isEnabled)
         if enabled.isEmpty {
@@ -37,9 +58,18 @@ struct MenuBarView: View {
         } else {
             ForEach(enabled) { scenario in
                 Button(scenario.name) {
-                    // Text acquisition and transformation wired in Phase 4.
+                    triggerTransformation(for: scenario)
                 }
+                .disabled(orchestrator.state.isTransforming)
             }
         }
+    }
+
+    private func triggerTransformation(for scenario: Scenario) {
+        guard let provider = providerStore.makeActiveProvider() else {
+            openSettings()
+            return
+        }
+        orchestrator.transform(with: scenario, provider: provider)
     }
 }
