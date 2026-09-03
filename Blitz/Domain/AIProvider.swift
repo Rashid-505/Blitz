@@ -3,7 +3,10 @@ import Foundation
 protocol AIProvider {
     var id: ProviderID { get }
     var displayName: String { get }
-    func transform(text: String, instruction: String) async throws -> String
+    // nonisolated so callers outside the main actor (e.g. NSServices handler) can
+    // call this without hopping to the main actor, which would deadlock when the
+    // main thread is synchronously waiting for the result.
+    nonisolated func transform(text: String, instruction: String) async throws -> String
 }
 
 enum ProviderID: String, CaseIterable, Hashable {

@@ -6,11 +6,11 @@ enum PromptBuilder {
         let user: String
     }
 
-    static func build(instruction: String, text: String) -> Prompt {
+    nonisolated static func build(instruction: String, text: String) -> Prompt {
         Prompt(system: systemPrompt(for: instruction), user: text)
     }
 
-    private static func systemPrompt(for instruction: String) -> String {
+    nonisolated private static func systemPrompt(for instruction: String) -> String {
         """
         \(instruction)
 

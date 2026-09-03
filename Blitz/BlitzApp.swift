@@ -23,6 +23,9 @@ struct BlitzApp: App {
             textSelectionService: textService,
             textReplacementService: textService
         )
+        // Give the AppDelegate access to the provider store so NSServices
+        // handlers can reach the active provider without duplicating state.
+        appDelegate.providerStore = providerStore
     }
 
     var body: some Scene {

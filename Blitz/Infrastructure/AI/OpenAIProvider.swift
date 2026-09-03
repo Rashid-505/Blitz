@@ -16,14 +16,14 @@ final class OpenAIProvider: AIProvider {
         self.session = session
     }
 
-    func transform(text: String, instruction: String) async throws -> String {
+    nonisolated func transform(text: String, instruction: String) async throws -> String {
         let prompt = PromptBuilder.build(instruction: instruction, text: text)
         let request = try buildRequest(prompt: prompt)
         let (data, response) = try await fetch(request: request)
         return try parse(data: data, response: response)
     }
 
-    private func buildRequest(prompt: PromptBuilder.Prompt) throws -> URLRequest {
+    nonisolated private func buildRequest(prompt: PromptBuilder.Prompt) throws -> URLRequest {
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "POST"
@@ -42,7 +42,7 @@ final class OpenAIProvider: AIProvider {
         return request
     }
 
-    private func fetch(request: URLRequest) async throws -> (Data, URLResponse) {
+    nonisolated private func fetch(request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
         } catch let error as URLError {
@@ -54,7 +54,7 @@ final class OpenAIProvider: AIProvider {
         }
     }
 
-    private func parse(data: Data, response: URLResponse) throws -> String {
+    nonisolated private func parse(data: Data, response: URLResponse) throws -> String {
         guard let http = response as? HTTPURLResponse else {
             throw AIError.invalidResponse("Non-HTTP response")
         }
@@ -80,7 +80,7 @@ final class OpenAIProvider: AIProvider {
         return result
     }
 
-    private func errorMessage(in data: Data) -> String? {
+    nonisolated private func errorMessage(in data: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
             .flatMap { $0["error"] as? [String: Any] }
             .flatMap { $0["message"] as? String }
