@@ -47,16 +47,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { return }
 
         let instruction = scenario.instruction
-        var result: String?
+
+        // ResultHolder allows the detached task to write its result into
+        // a heap-allocated container that is safely readable after the
+        // semaphore signals. nonisolated(unsafe) opts out of actor isolation
+        // checking; the semaphore provides the necessary memory ordering.
+        final class ResultHolder: @unchecked Sendable { nonisolated(unsafe) var value: String? }
+        let holder = ResultHolder()
         let semaphore = DispatchSemaphore(value: 0)
 
-        // Task.detached runs on the cooperative thread pool — it does NOT require
-        // the main actor. transform() is nonisolated so it also stays off the main
-        // actor. This lets the semaphore.wait() below safely block the calling
-        // thread while network I/O runs on system threads.
+        // Task.detached runs on the cooperative thread pool — not the main actor.
+        // transform() is nonisolated, so no main-actor hop occurs while the
+        // main thread is blocked on semaphore.wait(), avoiding a deadlock.
         Task.detached {
             do {
-                result = try await provider.transform(text: text, instruction: instruction)
+                holder.value = try await provider.transform(text: text, instruction: instruction)
             } catch {}
             semaphore.signal()
         }
@@ -64,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = semaphore.wait(timeout: .now() + 30)
 
         guard
-            let transformed = result,
+            let transformed = holder.value,
             !transformed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
 

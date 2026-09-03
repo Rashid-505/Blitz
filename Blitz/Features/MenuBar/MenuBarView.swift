@@ -43,6 +43,7 @@ struct MenuBarView: View {
             Divider()
         case .failed(let error):
             Text(error.localizedDescription)
+                .lineLimit(3)
                 .foregroundStyle(.red)
             Button("Dismiss") { orchestrator.cancel() }
             Divider()

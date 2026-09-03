@@ -24,8 +24,17 @@ final class GeminiProvider: AIProvider {
     }
 
     nonisolated private func buildRequest(prompt: PromptBuilder.Prompt) throws -> URLRequest {
-        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)"
-        let url = URL(string: urlString)!
+        // Use URLComponents to safely percent-encode the API key rather than
+        // interpolating it directly, which would crash if the key contains
+        // URL-unsafe characters.
+        guard var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent") else {
+            throw AIError.invalidResponse("Failed to construct request URL")
+        }
+        components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+        guard let url = components.url else {
+            throw AIError.invalidResponse("Failed to construct request URL")
+        }
+
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

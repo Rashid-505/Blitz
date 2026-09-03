@@ -78,7 +78,9 @@ final class TransformationOrchestrator {
         } catch TextServiceError.accessibilityPermissionDenied {
             textSelectionService.requestAccessibilityPermission()
             state = .failed(TextServiceError.accessibilityPermissionDenied)
-        } catch is CancellationError {
+        } catch AIError.cancelled, is CancellationError {
+            // URLSession cancellation (AIError.cancelled) and Swift task cancellation
+            // (CancellationError) both mean the user dismissed the operation — return to idle.
             state = .idle
         } catch {
             state = .failed(error)

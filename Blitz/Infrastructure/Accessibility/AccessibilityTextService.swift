@@ -118,12 +118,21 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
 
         let src = CGEventSource(stateID: .hidSystemState)
         let vKey: CGKeyCode = 9 // 'v'
-        let keyDown = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: true)
-        let keyUp = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: false)
-        keyDown?.flags = .maskCommand
-        keyUp?.flags = .maskCommand
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
+
+        guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: true),
+              let keyUp   = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: false) else {
+            // CGEvent creation failed — restore the clipboard before giving up.
+            if let saved {
+                pasteboard.clearContents()
+                pasteboard.setString(saved, forType: .string)
+            }
+            throw TextServiceError.replacementFailed("Failed to create keyboard event")
+        }
+
+        keyDown.flags = .maskCommand
+        keyUp.flags   = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
 
         try await Task.sleep(for: .milliseconds(150))
 

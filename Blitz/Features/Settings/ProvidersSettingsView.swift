@@ -5,6 +5,7 @@ struct ProvidersSettingsView: View {
     @State private var apiKeyInput = ""
     @State private var isKeyVisible = false
     @State private var testStatus: TestStatus = .idle
+    @State private var testTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -13,6 +14,9 @@ struct ProvidersSettingsView: View {
             connectionSection
         }
         .formStyle(.grouped)
+        .onDisappear {
+            testTask?.cancel()
+        }
     }
 
     @ViewBuilder
@@ -22,6 +26,7 @@ struct ProvidersSettingsView: View {
                 get: { store.activeProviderID },
                 set: {
                     store.setActiveProvider($0)
+                    testTask?.cancel()
                     resetInputState()
                 }
             )) {
@@ -80,7 +85,7 @@ struct ProvidersSettingsView: View {
     private var connectionSection: some View {
         Section("Connection") {
             Button("Test Connection") {
-                Task { await runConnectionTest() }
+                startConnectionTest()
             }
             .disabled(!store.hasAPIKey(for: store.activeProviderID) || testStatus == .running)
 
@@ -117,8 +122,13 @@ struct ProvidersSettingsView: View {
         try? store.clearAPIKey(for: store.activeProviderID)
     }
 
-    private func runConnectionTest() async {
+    private func startConnectionTest() {
+        testTask?.cancel()
         testStatus = .running
+        testTask = Task { await runConnectionTest() }
+    }
+
+    private func runConnectionTest() async {
         guard let provider = store.makeProvider(for: store.activeProviderID) else {
             testStatus = .failure("No API key configured.")
             return
@@ -128,7 +138,10 @@ struct ProvidersSettingsView: View {
                 text: "Hello",
                 instruction: "Reply with only the word 'OK' and nothing else."
             )
+            guard !Task.isCancelled else { return }
             testStatus = .success("Connected — \"\(result.prefix(60))\"")
+        } catch is CancellationError {
+            testStatus = .idle
         } catch let error as AIError {
             testStatus = .failure(error.localizedDescription)
         } catch {

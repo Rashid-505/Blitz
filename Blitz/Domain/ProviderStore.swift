@@ -36,8 +36,7 @@ final class ProviderStore {
     }
 
     func makeProvider(for id: ProviderID) -> (any AIProvider)? {
-        guard let key = (try? KeychainStore.retrieve(forKey: id.keychainKey)) ?? nil,
-              !key.isEmpty else { return nil }
+        guard let key = storedKey(for: id), !key.isEmpty else { return nil }
         switch id {
         case .openAI: return OpenAIProvider(apiKey: key)
         case .gemini: return GeminiProvider(apiKey: key)
@@ -50,9 +49,14 @@ final class ProviderStore {
 
     private func refreshStoredKeys() {
         storedProviderIDs = Set(ProviderID.allCases.filter { id in
-            let key = (try? KeychainStore.retrieve(forKey: id.keychainKey)) ?? nil
-            return !(key?.isEmpty ?? true)
+            guard let key = storedKey(for: id) else { return false }
+            return !key.isEmpty
         })
+    }
+
+    // Flattens the double-optional produced by `try?` on a throwing `String?`-returning function.
+    private func storedKey(for id: ProviderID) -> String? {
+        (try? KeychainStore.retrieve(forKey: id.keychainKey)).flatMap { $0 }
     }
 
     private enum Keys {
