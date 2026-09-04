@@ -17,11 +17,21 @@ struct ModelOption: Identifiable, Hashable {
 enum ProviderID: String, CaseIterable, Hashable {
     case openAI = "openai"
     case gemini = "gemini"
+    case apple  = "apple"
 
     var displayName: String {
         switch self {
         case .openAI: "OpenAI"
         case .gemini: "Google Gemini"
+        case .apple:  "Apple Intelligence"
+        }
+    }
+
+    /// Whether this provider requires a user-supplied API key.
+    var requiresAPIKey: Bool {
+        switch self {
+        case .openAI, .gemini: return true
+        case .apple:           return false
         }
     }
 
@@ -33,6 +43,7 @@ enum ProviderID: String, CaseIterable, Hashable {
         switch self {
         case .openAI: "gpt-4o-mini"
         case .gemini: "gemini-2.0-flash"
+        case .apple:  "on-device"
         }
     }
 
@@ -51,8 +62,10 @@ enum ProviderID: String, CaseIterable, Hashable {
             return [
                 ModelOption(id: "gemini-3.5-flash",      displayName: "Gemini 3.5 Flash"),
                 ModelOption(id: "gemini-3.5-flash-lite",  displayName: "Gemini 3.5 Flash Lite"),
-                ModelOption(id: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash")
+                ModelOption(id: "gemini-3.6-flash",       displayName: "Gemini 3.6 Flash"),
             ]
+        case .apple:
+            return []
         }
     }
 }

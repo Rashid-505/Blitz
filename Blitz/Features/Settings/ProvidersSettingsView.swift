@@ -10,8 +10,15 @@ struct ProvidersSettingsView: View {
     var body: some View {
         Form {
             providerSection
-            modelSection
-            apiKeySection
+            if !store.activeProviderID.availableModels.isEmpty {
+                modelSection
+            }
+            if store.activeProviderID.requiresAPIKey {
+                apiKeySection
+            }
+            if store.activeProviderID == .apple {
+                appleStatusSection
+            }
             connectionSection
         }
         .formStyle(.grouped)
@@ -92,6 +99,39 @@ struct ProvidersSettingsView: View {
                     Label("Not configured", systemImage: "exclamationmark.circle")
                         .foregroundStyle(.secondary)
                         .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var appleStatusSection: some View {
+        Section("Apple Intelligence") {
+            let status = AppleIntelligenceCapability.status
+            HStack(spacing: 10) {
+                switch status {
+                case .available:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Available and ready")
+                case .notEnabled:
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Not enabled")
+                            .fontWeight(.medium)
+                        Text("Enable in System Settings → Apple Intelligence & Siri")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                case .notEligible:
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                    Text("This device does not support Apple Intelligence")
+                case .modelNotReady:
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(.blue)
+                    Text("Model is still downloading")
                 }
             }
         }

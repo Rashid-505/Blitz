@@ -8,6 +8,7 @@ enum AIError: Error, LocalizedError {
     case cancelled
     case invalidResponse(String)
     case serviceError(statusCode: Int, message: String?)
+    case modelUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,8 @@ enum AIError: Error, LocalizedError {
             return "Unexpected response: \(detail)"
         case .serviceError(let code, let message):
             return "Service error (\(code)): \(message ?? "Unknown error")"
+        case .modelUnavailable(let reason):
+            return reason
         }
     }
 }

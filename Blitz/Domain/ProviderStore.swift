@@ -44,11 +44,15 @@ final class ProviderStore {
     }
 
     func makeProvider(for id: ProviderID) -> (any AIProvider)? {
-        guard let key = storedKey(for: id), !key.isEmpty else { return nil }
-        let model = activeModelID(for: id)
         switch id {
-        case .openAI: return OpenAIProvider(apiKey: key, model: model)
-        case .gemini: return GeminiProvider(apiKey: key, model: model)
+        case .apple:
+            return AppleFoundationModelProvider()
+        case .openAI:
+            guard let key = storedKey(for: .openAI), !key.isEmpty else { return nil }
+            return OpenAIProvider(apiKey: key, model: activeModelID(for: .openAI))
+        case .gemini:
+            guard let key = storedKey(for: .gemini), !key.isEmpty else { return nil }
+            return GeminiProvider(apiKey: key, model: activeModelID(for: .gemini))
         }
     }
 
@@ -58,6 +62,7 @@ final class ProviderStore {
 
     private func refreshStoredKeys() {
         storedProviderIDs = Set(ProviderID.allCases.filter { id in
+            guard id.requiresAPIKey else { return true }
             guard let key = storedKey(for: id) else { return false }
             return !key.isEmpty
         })
