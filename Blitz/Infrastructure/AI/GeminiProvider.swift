@@ -4,7 +4,7 @@ final class GeminiProvider: AIProvider {
     let id = ProviderID.gemini
     let displayName = "Google Gemini"
 
-    static let defaultModel = "gemini-2.0-flash"
+    static let defaultModel = "gemini-3.1-flash-lite"
 
     private let apiKey: String
     private let model: String
