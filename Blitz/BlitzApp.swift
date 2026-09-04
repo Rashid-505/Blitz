@@ -35,6 +35,7 @@ struct BlitzApp: App {
         let presenter = BlitzOverlayPresenter(
             orchestrator: orchestrator,
             providerStore: providerStore,
+            scenarioStore: scenarioStore,
             modelContainer: sharedContainer
         )
         overlayPresenter = presenter

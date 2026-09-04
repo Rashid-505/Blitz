@@ -26,7 +26,7 @@ private extension Color {
 
 struct BlitzOverlayView: View {
 
-    @Query(sort: \Scenario.order) private var scenarios: [Scenario]
+    @Environment(ScenarioStore.self) private var scenarioStore
     @Environment(TransformationOrchestrator.self) private var orchestrator
     @Environment(ProviderStore.self) private var providerStore
 
@@ -138,7 +138,7 @@ struct BlitzOverlayView: View {
 
     private var idleContent: some View {
         VStack(alignment: .leading, spacing: 2) {
-            let enabled = scenarios.filter(\.isEnabled)
+            let enabled = scenarioStore.enabledScenarios
             if enabled.isEmpty {
                 Text("No scenarios enabled")
                     .foregroundStyle(.secondary)

@@ -3,11 +3,44 @@ import SwiftData
 
 @Observable
 final class ScenarioStore {
+    /// Scenarios ordered by `order`, kept in sync with the model context.
+    ///
+    /// Views read this instead of `@Query`: the menu bar and the overlay are
+    /// hosted outside the app's window scene, where a `@Query` does not observe
+    /// the context reliably and can render an empty list after launch.
+    private(set) var scenarios: [Scenario] = []
+
     private let modelContext: ModelContext
+    private var saveObserver: NSObjectProtocol?
+
+    var enabledScenarios: [Scenario] {
+        scenarios.filter(\.isEnabled)
+    }
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         seedBuiltInsIfNeeded()
+        refresh()
+
+        // Toggling a scenario in Settings saves through the environment's
+        // context, so refresh whenever any save lands.
+        saveObserver = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+    }
+
+    deinit {
+        if let saveObserver {
+            NotificationCenter.default.removeObserver(saveObserver)
+        }
+    }
+
+    func refresh() {
+        scenarios = fetchAll()
     }
 
     func addScenario(name: String, instruction: String) {
@@ -39,6 +72,7 @@ final class ScenarioStore {
 
     func save() {
         try? modelContext.save()
+        refresh()
     }
 
     private func seedBuiltInsIfNeeded() {

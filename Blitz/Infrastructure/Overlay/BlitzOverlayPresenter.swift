@@ -17,6 +17,7 @@ final class BlitzOverlayPresenter {
     private var window: BlitzOverlayWindow?
     private let orchestrator: TransformationOrchestrator
     private let providerStore: ProviderStore
+    private let scenarioStore: ScenarioStore
     private let modelContainer: ModelContainer
     private var openSettingsAction: (() -> Void)?
     private var clickOutsideMonitor: Any?
@@ -25,10 +26,12 @@ final class BlitzOverlayPresenter {
     init(
         orchestrator: TransformationOrchestrator,
         providerStore: ProviderStore,
+        scenarioStore: ScenarioStore,
         modelContainer: ModelContainer
     ) {
         self.orchestrator = orchestrator
         self.providerStore = providerStore
+        self.scenarioStore = scenarioStore
         self.modelContainer = modelContainer
     }
 
@@ -60,6 +63,7 @@ final class BlitzOverlayPresenter {
         )
         .environment(orchestrator)
         .environment(providerStore)
+        .environment(scenarioStore)
         .modelContainer(modelContainer)
 
         let panel = BlitzOverlayWindow()

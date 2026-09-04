@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct MenuBarView: View {
-    @Query(sort: \Scenario.order) private var scenarios: [Scenario]
+    @Environment(ScenarioStore.self) private var scenarioStore
     @Environment(\.openSettings) private var openSettings
     @Environment(ProviderStore.self) private var providerStore
     @Environment(TransformationOrchestrator.self) private var orchestrator
@@ -53,7 +53,7 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var scenariosSection: some View {
-        let enabled = scenarios.filter(\.isEnabled)
+        let enabled = scenarioStore.enabledScenarios
         if enabled.isEmpty {
             Text("No scenarios enabled")
                 .foregroundStyle(.secondary)
