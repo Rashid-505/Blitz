@@ -8,7 +8,10 @@ struct BlitzApp: App {
     private let sharedContainer: ModelContainer
     private let scenarioStore: ScenarioStore
     private let providerStore: ProviderStore
+    private let textService: AccessibilityTextService
     private let orchestrator: TransformationOrchestrator
+    private let shortcutManager: GlobalShortcutManager
+    private let overlayPresenter: BlitzOverlayPresenter
 
     init() {
         do {
@@ -16,16 +19,43 @@ struct BlitzApp: App {
         } catch {
             fatalError("SwiftData container failed to initialize: \(error)")
         }
+
         scenarioStore = ScenarioStore(modelContext: sharedContainer.mainContext)
         providerStore = ProviderStore()
-        let textService = AccessibilityTextService()
+
+        let service = AccessibilityTextService()
+        textService = service
         orchestrator = TransformationOrchestrator(
-            textSelectionService: textService,
-            textReplacementService: textService
+            textSelectionService: service,
+            textReplacementService: service
         )
+
+        shortcutManager = GlobalShortcutManager()
+
+        let presenter = BlitzOverlayPresenter(
+            orchestrator: orchestrator,
+            providerStore: providerStore,
+            modelContainer: sharedContainer
+        )
+        overlayPresenter = presenter
+
+        // Open Settings from the overlay without SwiftUI's openSettings environment.
+        presenter.setOpenSettings {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            BlitzApp.bringSettingsToFront()
+        }
+
         // Give the AppDelegate access to the provider store so NSServices
         // handlers can reach the active provider without duplicating state.
         appDelegate.providerStore = providerStore
+
+        // Wire the global shortcut → overlay. Capturing strongly is intentional;
+        // both objects live for the app's lifetime and there is no retain cycle.
+        shortcutManager.onActivate = {
+            let rect = service.getSelectionScreenRect()
+            presenter.show(near: rect)
+        }
+        shortcutManager.register()
     }
 
     var body: some Scene {
@@ -39,10 +69,27 @@ struct BlitzApp: App {
         .modelContainer(sharedContainer)
 
         Settings {
-            SettingsView()
+            SettingsView(shortcutManager: shortcutManager)
                 .environment(scenarioStore)
                 .environment(providerStore)
         }
         .modelContainer(sharedContainer)
+    }
+
+    /// Activates Blitz and brings the Settings window to the front.
+    ///
+    /// Blitz runs as an accessory app (no Dock icon), so its windows open behind
+    /// the frontmost application by default. The 50 ms delay gives SwiftUI time
+    /// to create the window before we order it front.
+    static func bringSettingsToFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            NSApp.windows
+                .filter { !($0 is NSPanel) && $0.canBecomeKey }
+                .forEach {
+                    $0.makeKeyAndOrderFront(nil)
+                    $0.orderFrontRegardless()
+                }
+        }
     }
 }

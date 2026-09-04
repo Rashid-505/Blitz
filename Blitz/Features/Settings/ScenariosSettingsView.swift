@@ -89,13 +89,11 @@ private struct ScenarioRow: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.link)
 
-            if !scenario.isBuiltIn {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.borderless)
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .foregroundStyle(.red)
             }
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
     }

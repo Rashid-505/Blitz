@@ -9,6 +9,11 @@ protocol AIProvider {
     nonisolated func transform(text: String, instruction: String) async throws -> String
 }
 
+struct ModelOption: Identifiable, Hashable {
+    let id: String          // API-facing model identifier
+    let displayName: String
+}
+
 enum ProviderID: String, CaseIterable, Hashable {
     case openAI = "openai"
     case gemini = "gemini"
@@ -22,5 +27,32 @@ enum ProviderID: String, CaseIterable, Hashable {
 
     var keychainKey: String {
         "com.rashidhuseynov.Blitz.apiKey.\(rawValue)"
+    }
+
+    var defaultModelID: String {
+        switch self {
+        case .openAI: "gpt-4o-mini"
+        case .gemini: "gemini-2.0-flash"
+        }
+    }
+
+    var availableModels: [ModelOption] {
+        switch self {
+        case .openAI:
+            return [
+                ModelOption(id: "gpt-4o-mini",  displayName: "GPT-4o mini"),
+                ModelOption(id: "gpt-4o",        displayName: "GPT-4o"),
+                ModelOption(id: "gpt-4.1-nano",  displayName: "GPT-4.1 nano"),
+                ModelOption(id: "gpt-4.1-mini",  displayName: "GPT-4.1 mini"),
+                ModelOption(id: "gpt-4.1",       displayName: "GPT-4.1"),
+                ModelOption(id: "o4-mini",        displayName: "o4-mini"),
+            ]
+        case .gemini:
+            return [
+                ModelOption(id: "gemini-3.5-flash",      displayName: "Gemini 3.5 Flash"),
+                ModelOption(id: "gemini-3.5-flash-lite",  displayName: "Gemini 3.5 Flash Lite"),
+                ModelOption(id: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash")
+            ]
+        }
     }
 }

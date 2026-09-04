@@ -1,9 +1,11 @@
 import SwiftUI
 
 struct SettingsView: View {
+    let shortcutManager: GlobalShortcutManager
+
     var body: some View {
         TabView {
-            GeneralSettingsView()
+            GeneralSettingsView(shortcutManager: shortcutManager)
                 .tabItem { Label("General", systemImage: "gear") }
 
             ScenariosSettingsView()
@@ -12,10 +14,6 @@ struct SettingsView: View {
             ProvidersSettingsView()
                 .tabItem { Label("Providers", systemImage: "cpu") }
         }
-        .frame(width: 520, height: 400)
+        .frame(width: 520, height: 460)
     }
-}
-
-#Preview {
-    SettingsView()
 }

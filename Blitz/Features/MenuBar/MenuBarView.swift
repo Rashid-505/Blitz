@@ -15,6 +15,7 @@ struct MenuBarView: View {
 
         Button("Settings...") {
             openSettings()
+            BlitzApp.bringSettingsToFront()
         }
         .keyboardShortcut(",")
 

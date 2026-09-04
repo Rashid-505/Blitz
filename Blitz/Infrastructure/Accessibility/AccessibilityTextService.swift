@@ -94,6 +94,85 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         }
     }
 
+    // MARK: - Position
+
+    /// Returns a screen-coordinate rect for the current text selection, suitable
+    /// for positioning the overlay panel near the selected text.
+    ///
+    /// Fallback order:
+    ///   1. Selected-text bounds via AX parameterized attribute (supported by
+    ///      NSTextView-based apps; unavailable in browsers, Electron, etc.)
+    ///   2. Focused element frame via kAXFrameAttribute (widely supported)
+    ///   3. Mouse cursor position (always available)
+    ///   4. nil — caller should use a screen-center fallback
+    func getSelectionScreenRect() -> CGRect? {
+        guard let app = resolveTargetApp() else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef else {
+            return mouseLocationFallback()
+        }
+        let focused = focusedRef as! AXUIElement
+
+        // Attempt 1: bounds for the selected text range
+        if let rect = selectedTextBounds(in: focused) {
+            return rect
+        }
+
+        // Attempt 2: frame of the focused element itself
+        if let rect = elementFrame(focused) {
+            return rect
+        }
+
+        // Attempt 3: mouse cursor
+        return mouseLocationFallback()
+    }
+
+    private func selectedTextBounds(in element: AXUIElement) -> CGRect? {
+        // Get the selected text range as an AXValue wrapping a CFRange.
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef else { return nil }
+
+        // Ask for the bounding rect of that range.
+        var boundsRef: CFTypeRef?
+        let status = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXBoundsForRangeParameterizedAttribute as CFString,
+            rangeRef,
+            &boundsRef
+        )
+        guard status == .success, let boundsRef else { return nil }
+
+        var rect = CGRect.zero
+        guard AXValueGetValue(boundsRef as! AXValue, .cgRect, &rect) else { return nil }
+        guard rect != .zero else { return nil }
+        return rect
+    }
+
+    private func elementFrame(_ element: AXUIElement) -> CGRect? {
+        var posRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success,
+              let posRef else { return nil }
+        guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let sizeRef else { return nil }
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(posRef as! AXValue, .cgPoint, &position) else { return nil }
+        guard AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) else { return nil }
+        let rect = CGRect(origin: position, size: size)
+        guard rect != .zero else { return nil }
+        return rect
+    }
+
+    private func mouseLocationFallback() -> CGRect? {
+        let loc = NSEvent.mouseLocation
+        return CGRect(x: loc.x, y: loc.y, width: 0, height: 0)
+    }
+
     // MARK: - Private
 
     private func resolveTargetApp() -> NSRunningApplication? {

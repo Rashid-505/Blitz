@@ -35,11 +35,20 @@ final class ProviderStore {
         refreshStoredKeys()
     }
 
+    func activeModelID(for id: ProviderID) -> String {
+        UserDefaults.standard.string(forKey: modelKey(for: id)) ?? id.defaultModelID
+    }
+
+    func setModel(_ modelID: String, for id: ProviderID) {
+        UserDefaults.standard.set(modelID, forKey: modelKey(for: id))
+    }
+
     func makeProvider(for id: ProviderID) -> (any AIProvider)? {
         guard let key = storedKey(for: id), !key.isEmpty else { return nil }
+        let model = activeModelID(for: id)
         switch id {
-        case .openAI: return OpenAIProvider(apiKey: key)
-        case .gemini: return GeminiProvider(apiKey: key)
+        case .openAI: return OpenAIProvider(apiKey: key, model: model)
+        case .gemini: return GeminiProvider(apiKey: key, model: model)
         }
     }
 
@@ -57,6 +66,10 @@ final class ProviderStore {
     // Flattens the double-optional produced by `try?` on a throwing `String?`-returning function.
     private func storedKey(for id: ProviderID) -> String? {
         (try? KeychainStore.retrieve(forKey: id.keychainKey)).flatMap { $0 }
+    }
+
+    private func modelKey(for id: ProviderID) -> String {
+        "blitz.model.\(id.rawValue)"
     }
 
     private enum Keys {

@@ -23,7 +23,6 @@ final class ScenarioStore {
     }
 
     func delete(_ scenario: Scenario) {
-        guard !scenario.isBuiltIn else { return }
         modelContext.delete(scenario)
         save()
         reindexOrders()

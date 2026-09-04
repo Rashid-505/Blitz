@@ -10,6 +10,7 @@ struct ProvidersSettingsView: View {
     var body: some View {
         Form {
             providerSection
+            modelSection
             apiKeySection
             connectionSection
         }
@@ -35,6 +36,21 @@ struct ProvidersSettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var modelSection: some View {
+        let providerID = store.activeProviderID
+        Section("Model") {
+            Picker("Model", selection: Binding(
+                get: { store.activeModelID(for: providerID) },
+                set: { store.setModel($0, for: providerID) }
+            )) {
+                ForEach(providerID.availableModels) { model in
+                    Text(model.displayName).tag(model.id)
+                }
+            }
         }
     }
 
