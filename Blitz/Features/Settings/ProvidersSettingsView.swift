@@ -114,8 +114,12 @@ struct ProvidersSettingsView: View {
     }
 
     private func saveKey() {
-        try? store.storeAPIKey(apiKeyInput, for: store.activeProviderID)
-        apiKeyInput = ""
+        do {
+            try store.storeAPIKey(apiKeyInput, for: store.activeProviderID)
+            apiKeyInput = ""
+        } catch {
+            testStatus = .failure("Failed to save key: \(error.localizedDescription)")
+        }
     }
 
     private func clearKey() {

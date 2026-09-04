@@ -24,7 +24,8 @@ struct ScenarioEditView: View {
     }
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty
+        !name.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !instruction.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
