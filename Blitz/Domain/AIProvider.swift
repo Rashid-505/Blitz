@@ -42,7 +42,7 @@ enum ProviderID: String, CaseIterable, Hashable {
     var defaultModelID: String {
         switch self {
         case .openAI: "gpt-4o-mini"
-        case .gemini: "gemini-2.0-flash"
+        case .gemini: "gemini-3.6-flash"
         case .apple:  "on-device"
         }
     }
@@ -60,9 +60,11 @@ enum ProviderID: String, CaseIterable, Hashable {
             ]
         case .gemini:
             return [
-                ModelOption(id: "gemini-3.5-flash",      displayName: "Gemini 3.5 Flash"),
-                ModelOption(id: "gemini-3.5-flash-lite",  displayName: "Gemini 3.5 Flash Lite"),
+                ModelOption(id: "gemini-3.8-flash",       displayName: "Gemini 3.8 Flash (newest)"),
                 ModelOption(id: "gemini-3.6-flash",       displayName: "Gemini 3.6 Flash"),
+                ModelOption(id: "gemini-3.5-flash",       displayName: "Gemini 3.5 Flash"),
+                ModelOption(id: "gemini-3.5-flash-lite",  displayName: "Gemini 3.5 Flash Lite"),
+                ModelOption(id: "gemini-3.1-flash-lite",  displayName: "Gemini 3.1 Flash Lite (fastest)"),
             ]
         case .apple:
             return []

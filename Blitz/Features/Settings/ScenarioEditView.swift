@@ -42,8 +42,10 @@ struct ScenarioEditView: View {
 
                 Section("Details") {
                     TextField("Name", text: $name)
+                        .multilineTextAlignment(.leading)
                     TextField("Instruction", text: $instruction, axis: .vertical)
                         .lineLimit(5...)
+                        .multilineTextAlignment(.leading)
                 }
             }
             .formStyle(.grouped)

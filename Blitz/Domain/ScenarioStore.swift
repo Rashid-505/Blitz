@@ -76,20 +76,26 @@ final class ScenarioStore {
     }
 
     private func seedBuiltInsIfNeeded() {
-        let descriptor = FetchDescriptor<Scenario>(predicate: #Predicate { $0.isBuiltIn })
-        let count = (try? modelContext.fetchCount(descriptor)) ?? 0
-        guard count == 0 else { return }
+        let existing = fetchAll()
+        let existingNames = Set(existing.map(\.name))
+        var nextOrder = (existing.map(\.order).max() ?? -1) + 1
 
-        for (index, definition) in BuiltInScenarios.all.enumerated() {
+        var didInsert = false
+        for definition in BuiltInScenarios.all where !existingNames.contains(definition.name) {
             modelContext.insert(Scenario(
                 name: definition.name,
                 instruction: definition.instruction,
                 isEnabled: true,
-                order: index,
+                order: nextOrder,
                 isBuiltIn: true
             ))
+            nextOrder += 1
+            didInsert = true
         }
-        save()
+
+        if didInsert {
+            save()
+        }
     }
 
     private func fetchAll() -> [Scenario] {

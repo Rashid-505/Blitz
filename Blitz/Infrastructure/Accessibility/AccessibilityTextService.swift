@@ -1,5 +1,16 @@
 import AppKit
 import ApplicationServices
+import os
+
+/// Lightweight logging used to diagnose text-selection issues. Visible in the
+/// Xcode console and Console.app (subsystem "com.rashidhuseynov.Blitz").
+enum BlitzLog {
+    private static let logger = Logger(subsystem: "com.rashidhuseynov.Blitz", category: "ax")
+    static func ax(_ message: String) {
+        logger.debug("\(message, privacy: .public)")
+        print("[Blitz.ax] \(message)")
+    }
+}
 
 final class AccessibilityTextService: TextSelectionService, TextReplacementService {
 
@@ -39,32 +50,108 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
     }
 
     func readSelectedText() async throws -> String {
-        guard hasAccessibilityPermission() else {
+        let trusted = hasAccessibilityPermission()
+        BlitzLog.ax("readSelectedText start — AXIsProcessTrusted=\(trusted)")
+        guard trusted else {
             throw TextServiceError.accessibilityPermissionDenied
         }
 
-        guard let app = resolveTargetApp() else {
-            throw TextServiceError.noTextSelected
+        // Attempt 1: Accessibility API. Fast and non-destructive, but only works
+        // for native AppKit text controls that expose kAXSelectedText.
+        if let text = readSelectedTextViaAccessibility(), !text.isEmpty {
+            BlitzLog.ax("AX read succeeded (\(text.count) chars)")
+            return text
         }
+
+        // Attempt 2: Clipboard copy fallback. Browsers (Safari, Chrome) and
+        // Electron/Catalyst apps (VS Code, Slack, Notion, etc.) do NOT expose
+        // their selection through the Accessibility API, so we simulate ⌘C and
+        // read the selection off the pasteboard, restoring it afterward.
+        if let text = try await readSelectedTextViaPasteboard(), !text.isEmpty {
+            BlitzLog.ax("Pasteboard read succeeded (\(text.count) chars)")
+            return text
+        }
+
+        BlitzLog.ax("Both read paths failed → throwing noTextSelected")
+        throw TextServiceError.noTextSelected
+    }
+
+    /// Reads the current selection through the Accessibility API.
+    /// Returns nil if the target app does not expose selected text this way.
+    private func readSelectedTextViaAccessibility() -> String? {
+        guard let app = resolveTargetApp() else {
+            BlitzLog.ax("AX: resolveTargetApp returned nil")
+            return nil
+        }
+        BlitzLog.ax("AX: target app = \(app.localizedName ?? "?") [\(app.bundleIdentifier ?? "?")] pid=\(app.processIdentifier) active=\(app.isActive)")
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
         var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef else {
-            throw TextServiceError.noTextSelected
+        let focusErr = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef)
+        guard focusErr == .success, let focusedRef else {
+            BlitzLog.ax("AX: focused element query failed err=\(focusErr.rawValue)")
+            return nil
         }
 
         // AXUIElementCopyAttributeValue for kAXFocusedUIElement always returns an AXUIElement.
         let focused = focusedRef as! AXUIElement
         var selectedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &selectedRef) == .success,
-              let text = selectedRef as? String,
-              !text.isEmpty else {
-            throw TextServiceError.noTextSelected
+        let selErr = AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &selectedRef)
+        guard selErr == .success, let text = selectedRef as? String else {
+            BlitzLog.ax("AX: selected-text query failed err=\(selErr.rawValue) type=\(String(describing: selectedRef))")
+            return nil
         }
 
+        BlitzLog.ax("AX: selected-text length=\(text.count)")
         return text
+    }
+
+    /// Reads the current selection by simulating ⌘C and inspecting the pasteboard,
+    /// then restoring the previous clipboard contents. Works in apps that do not
+    /// support the Accessibility selected-text attribute.
+    private func readSelectedTextViaPasteboard() async throws -> String? {
+        let pasteboard = NSPasteboard.general
+        let saved = pasteboard.string(forType: .string)
+        let previousChangeCount = pasteboard.changeCount
+
+        // Ensure the target app is frontmost so the copy keystroke reaches it.
+        if let app = resolveTargetApp(), !app.isActive {
+            BlitzLog.ax("Pasteboard: activating target app \(app.localizedName ?? "?")")
+            app.activate()
+            try await Task.sleep(for: .milliseconds(80))
+        }
+
+        BlitzLog.ax("Pasteboard: posting ⌘C (previousChangeCount=\(previousChangeCount))")
+        postCommandKey(keyCode: 8) // 'c'
+
+        // Give the target app time to write the selection to the pasteboard.
+        try await Task.sleep(for: .milliseconds(120))
+
+        let changed = pasteboard.changeCount != previousChangeCount
+        let copied = changed ? pasteboard.string(forType: .string) : nil
+        BlitzLog.ax("Pasteboard: changed=\(changed) newChangeCount=\(pasteboard.changeCount) copiedLen=\(copied?.count ?? -1)")
+
+        // Restore the user's previous clipboard contents.
+        if let saved {
+            pasteboard.clearContents()
+            pasteboard.setString(saved, forType: .string)
+        }
+
+        return copied
+    }
+
+    /// Posts a Command+<key> keystroke to the system-wide HID event tap.
+    private func postCommandKey(keyCode: CGKeyCode) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
+              let keyUp   = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) else {
+            return
+        }
+        keyDown.flags = .maskCommand
+        keyUp.flags   = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
     }
 
     // MARK: - TextReplacementService

@@ -20,6 +20,11 @@ final class ProviderStore {
         storedProviderIDs.contains(id)
     }
 
+    /// Returns the stored API key for the provider, or an empty string if none.
+    func apiKey(for id: ProviderID) -> String {
+        storedKey(for: id) ?? ""
+    }
+
     func storeAPIKey(_ key: String, for id: ProviderID) throws {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {

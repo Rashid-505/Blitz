@@ -22,6 +22,9 @@ struct ProvidersSettingsView: View {
             connectionSection
         }
         .formStyle(.grouped)
+        .onAppear {
+            loadKeyForActiveProvider()
+        }
         .onDisappear {
             testTask?.cancel()
         }
@@ -36,6 +39,7 @@ struct ProvidersSettingsView: View {
                     store.setActiveProvider($0)
                     testTask?.cancel()
                     resetInputState()
+                    loadKeyForActiveProvider()
                 }
             )) {
                 ForEach(ProviderID.allCases, id: \.self) { id in
@@ -169,10 +173,15 @@ struct ProvidersSettingsView: View {
         testStatus = .idle
     }
 
+    /// Populates the input field with the provider's currently stored key so the
+    /// user can view/edit it (revealed with the eye toggle).
+    private func loadKeyForActiveProvider() {
+        apiKeyInput = store.apiKey(for: store.activeProviderID)
+    }
+
     private func saveKey() {
         do {
             try store.storeAPIKey(apiKeyInput, for: store.activeProviderID)
-            apiKeyInput = ""
         } catch {
             testStatus = .failure("Failed to save key: \(error.localizedDescription)")
         }
@@ -180,6 +189,7 @@ struct ProvidersSettingsView: View {
 
     private func clearKey() {
         try? store.clearAPIKey(for: store.activeProviderID)
+        apiKeyInput = ""
     }
 
     private func startConnectionTest() {
