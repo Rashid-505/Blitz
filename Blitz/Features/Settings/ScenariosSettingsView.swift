@@ -57,6 +57,10 @@ private struct ScenarioRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .imageScale(.small)
+
             Toggle("", isOn: $scenario.isEnabled)
                 .labelsHidden()
                 .onChange(of: scenario.isEnabled) { _, _ in
@@ -96,5 +100,16 @@ private struct ScenarioRow: View {
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button(action: onEdit) {
+                Label("Edit", systemImage: "pencil")
+            }
+            .tint(.blue)
+        }
     }
 }

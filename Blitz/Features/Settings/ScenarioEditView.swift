@@ -34,9 +34,6 @@ struct ScenarioEditView: View {
                 if isBuiltIn {
                     Section {
                         LabeledContent("Type", value: "Built-in")
-                    } footer: {
-                        Text("Built-in scenarios cannot be deleted but can be customized.")
-                            .foregroundStyle(.secondary)
                     }
                 }
 
