@@ -3,10 +3,17 @@ import Foundation
 enum TransformationState {
     case idle
     case transforming(scenarioName: String)
+    /// AI finished; waiting for the user to confirm or discard.
+    case preview(scenarioName: String, original: String, result: String)
     case failed(Error)
 
     var isTransforming: Bool {
         if case .transforming = self { return true }
+        return false
+    }
+
+    var isPreview: Bool {
+        if case .preview = self { return true }
         return false
     }
 
@@ -35,14 +42,19 @@ final class TransformationOrchestrator {
 
     private let textSelectionService: any TextSelectionService
     private let textReplacementService: any TextReplacementService
+    private let preferences: PreviewSettings
 
     init(
         textSelectionService: any TextSelectionService,
-        textReplacementService: any TextReplacementService
+        textReplacementService: any TextReplacementService,
+        preferences: PreviewSettings = PreviewSettings()
     ) {
         self.textSelectionService = textSelectionService
         self.textReplacementService = textReplacementService
+        self.preferences = preferences
     }
+
+    // MARK: - Public interface
 
     func transform(with scenario: Scenario, provider: any AIProvider) {
         // Extract values synchronously to avoid SwiftData threading concerns.
@@ -54,11 +66,33 @@ final class TransformationOrchestrator {
         }
     }
 
+    /// Writes the previewed text to the source application and returns to `.idle`.
+    ///
+    /// No-op when the state is not `.preview`.
+    func commit() {
+        guard case .preview(_, _, let result) = state else { return }
+        currentTask?.cancel()
+        currentTask = Task {
+            do {
+                try await textReplacementService.replaceSelectedText(with: result)
+                state = .idle
+            } catch is CancellationError {
+                state = .idle
+            } catch {
+                state = .failed(error)
+            }
+        }
+    }
+
+    /// Discards any in-progress transformation or pending preview and returns to `.idle`
+    /// without writing anything.
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
         state = .idle
     }
+
+    // MARK: - Private
 
     private func perform(scenarioName: String, instruction: String, provider: any AIProvider) async {
         state = .transforming(scenarioName: scenarioName)
@@ -73,8 +107,12 @@ final class TransformationOrchestrator {
                 throw TransformationError.emptyResponse
             }
 
-            try await textReplacementService.replaceSelectedText(with: transformed)
-            state = .idle
+            if preferences.isPreviewEnabled {
+                state = .preview(scenarioName: scenarioName, original: selectedText, result: transformed)
+            } else {
+                try await textReplacementService.replaceSelectedText(with: transformed)
+                state = .idle
+            }
         } catch TextServiceError.accessibilityPermissionDenied {
             textSelectionService.requestAccessibilityPermission()
             state = .failed(TextServiceError.accessibilityPermissionDenied)

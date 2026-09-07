@@ -17,6 +17,10 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
     private var previousFrontmostApp: NSRunningApplication?
     private var notificationObserver: NSObjectProtocol?
 
+    // Text captured on hotkey press, before the overlay window appears.
+    // Consumed by the first readSelectedText() call and then cleared.
+    private var cachedSelectedText: String?
+
     init() {
         // Track the last non-Blitz frontmost app so we can target it after
         // the menu bar opens and Blitz becomes the frontmost process.
@@ -38,6 +42,26 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         }
     }
 
+    // MARK: - Pre-read
+
+    /// Captures the current text selection while the target app still holds keyboard focus.
+    ///
+    /// **Must be called before showing the Blitz overlay.** Electron/Chromium apps
+    /// (Teams, Slack, VS Code, Chrome) often clear their text selection when any
+    /// other window calls `makeKey()`, even a `.nonactivatingPanel`. Reading the
+    /// selection before `show()` guarantees the text is available when the user
+    /// taps a scenario.
+    ///
+    /// The captured text is stored internally and consumed by the next
+    /// `readSelectedText()` call. If the read fails, the cache remains nil and
+    /// `readSelectedText()` performs a live read as a fallback.
+    func preReadSelection() async {
+        cachedSelectedText = nil
+        BlitzLog.ax("preRead: capturing selection before overlay appears")
+        cachedSelectedText = try? await readSelectedTextCore()
+        BlitzLog.ax("preRead: cached \(cachedSelectedText.map { "\($0.count) chars" } ?? "nil")")
+    }
+
     // MARK: - TextSelectionService
 
     func hasAccessibilityPermission() -> Bool {
@@ -50,6 +74,18 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
     }
 
     func readSelectedText() async throws -> String {
+        // Prefer the text captured by preReadSelection() — it was read while the
+        // target app still had keyboard focus, before the overlay stole it.
+        if let cached = cachedSelectedText, !cached.isEmpty {
+            cachedSelectedText = nil
+            BlitzLog.ax("readSelectedText: returning pre-captured text (\(cached.count) chars)")
+            return cached
+        }
+        cachedSelectedText = nil
+        return try await readSelectedTextCore()
+    }
+
+    private func readSelectedTextCore() async throws -> String {
         let trusted = hasAccessibilityPermission()
         BlitzLog.ax("readSelectedText start — AXIsProcessTrusted=\(trusted)")
         guard trusted else {
@@ -64,7 +100,7 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         }
 
         // Attempt 2: Clipboard copy fallback. Browsers (Safari, Chrome) and
-        // Electron/Catalyst apps (VS Code, Slack, Notion, etc.) do NOT expose
+        // Electron/Catalyst apps (VS Code, Slack, Teams, etc.) do NOT expose
         // their selection through the Accessibility API, so we simulate ⌘C and
         // read the selection off the pasteboard, restoring it afterward.
         if let text = try await readSelectedTextViaPasteboard(), !text.isEmpty {
@@ -76,8 +112,14 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         throw TextServiceError.noTextSelected
     }
 
+    // MARK: - AX read
+
     /// Reads the current selection through the Accessibility API.
-    /// Returns nil if the target app does not expose selected text this way.
+    ///
+    /// Two-level search: the application element first (standard AppKit path),
+    /// then via the focused window element (Chromium/Electron fallback).
+    /// Setting `AXEnhancedUserInterface` before querying activates the Chromium
+    /// accessibility tree; native AppKit apps ignore this attribute.
     private func readSelectedTextViaAccessibility() -> String? {
         guard let app = resolveTargetApp() else {
             BlitzLog.ax("AX: resolveTargetApp returned nil")
@@ -87,54 +129,84 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        var focusedRef: CFTypeRef?
-        let focusErr = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef)
-        guard focusErr == .success, let focusedRef else {
-            BlitzLog.ax("AX: focused element query failed err=\(focusErr.rawValue)")
-            return nil
+        // Hint Chromium/Electron to expose their accessibility tree.
+        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, true as CFTypeRef)
+
+        // Path 1: app element → focused UI element (standard AppKit apps).
+        if let focused = focusedElement(in: appElement) {
+            if let text = selectedText(in: focused), !text.isEmpty {
+                BlitzLog.ax("AX: selected-text length=\(text.count) (app element path)")
+                return text
+            }
+            BlitzLog.ax("AX: app-level focused element found but no selected text")
         }
 
-        // AXUIElementCopyAttributeValue for kAXFocusedUIElement always returns an AXUIElement.
-        let focused = focusedRef as! AXUIElement
-        var selectedRef: CFTypeRef?
-        let selErr = AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &selectedRef)
-        guard selErr == .success, let text = selectedRef as? String else {
-            BlitzLog.ax("AX: selected-text query failed err=\(selErr.rawValue) type=\(String(describing: selectedRef))")
-            return nil
+        // Path 2: app element → focused window → focused UI element.
+        // Chromium/Electron often only surfaces kAXFocusedUIElement on the
+        // window, not on the application element.
+        if let focused = focusedElementViaWindow(in: appElement) {
+            if let text = selectedText(in: focused), !text.isEmpty {
+                BlitzLog.ax("AX: selected-text length=\(text.count) (window element path)")
+                return text
+            }
+            BlitzLog.ax("AX: window-level focused element found but no selected text")
         }
 
-        BlitzLog.ax("AX: selected-text length=\(text.count)")
-        return text
+        BlitzLog.ax("AX: all accessibility paths exhausted")
+        return nil
     }
 
+    // MARK: - Pasteboard read
+
     /// Reads the current selection by simulating ⌘C and inspecting the pasteboard,
-    /// then restoring the previous clipboard contents. Works in apps that do not
-    /// support the Accessibility selected-text attribute.
+    /// then restoring the previous clipboard contents.
     private func readSelectedTextViaPasteboard() async throws -> String? {
+        guard let app = resolveTargetApp() else {
+            BlitzLog.ax("Pasteboard: no target app")
+            return nil
+        }
+
         let pasteboard = NSPasteboard.general
         let saved = pasteboard.string(forType: .string)
         let previousChangeCount = pasteboard.changeCount
 
-        // Ensure the target app is frontmost so the copy keystroke reaches it.
-        if let app = resolveTargetApp(), !app.isActive {
-            BlitzLog.ax("Pasteboard: activating target app \(app.localizedName ?? "?")")
-            app.activate()
-            try await Task.sleep(for: .milliseconds(80))
-        }
+        // Unconditionally re-activate the target app — even when isActive=true.
+        //
+        // Root cause: BlitzOverlayWindow calls makeKey() when it appears, which
+        // transfers keyboard focus to the panel even though NSRunningApplication
+        // still reports the target app as "active" (a .nonactivatingPanel quirk).
+        // Without re-activation ⌘C is delivered to the Blitz panel, not Teams/Chrome.
+        // Explicit activation restores keyboard focus to the target app.
+        BlitzLog.ax("Pasteboard: activating \(app.localizedName ?? "?") (isActive=\(app.isActive))")
+        app.activate(options: [.activateIgnoringOtherApps])
+        // Wait for the OS to transfer keyboard focus before posting the keystroke.
+        try await Task.sleep(for: .milliseconds(120))
 
         BlitzLog.ax("Pasteboard: posting ⌘C (previousChangeCount=\(previousChangeCount))")
         postCommandKey(keyCode: 8) // 'c'
 
-        // Give the target app time to write the selection to the pasteboard.
-        try await Task.sleep(for: .milliseconds(120))
+        // Poll with retries instead of a single fixed wait. Electron/Chromium apps
+        // route ⌘C through the renderer process and can take 200–400 ms to update
+        // the pasteboard. Budget: first check at 100 ms, then 4 × 80 ms = 420 ms.
+        var copied: String?
+        for attempt in 0..<5 {
+            try await Task.sleep(for: .milliseconds(attempt == 0 ? 100 : 80))
+            let newCount = pasteboard.changeCount
+            if newCount != previousChangeCount {
+                copied = pasteboard.string(forType: .string)
+                BlitzLog.ax("Pasteboard: changed on attempt \(attempt + 1) newCount=\(newCount) copiedLen=\(copied?.count ?? -1)")
+                break
+            }
+            BlitzLog.ax("Pasteboard: no change on attempt \(attempt + 1)")
+        }
 
-        let changed = pasteboard.changeCount != previousChangeCount
-        let copied = changed ? pasteboard.string(forType: .string) : nil
-        BlitzLog.ax("Pasteboard: changed=\(changed) newChangeCount=\(pasteboard.changeCount) copiedLen=\(copied?.count ?? -1)")
+        if copied == nil {
+            BlitzLog.ax("Pasteboard: no change after all retries — likely no selection in target app")
+        }
 
         // Restore the user's previous clipboard contents.
+        pasteboard.clearContents()
         if let saved {
-            pasteboard.clearContents()
             pasteboard.setString(saved, forType: .string)
         }
 
@@ -167,18 +239,20 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef else {
-            throw TextServiceError.replacementFailed("Could not find focused element in target application")
+        // Try AX write first (instant, no clipboard pollution).
+        // Check both the app-element path and the window path for Chromium/Electron.
+        let focusedEl = focusedElement(in: appElement) ?? focusedElementViaWindow(in: appElement)
+        if let focused = focusedEl {
+            let result = AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, newText as CFTypeRef)
+            if result == .success { return }
+            BlitzLog.ax("AX: set selected-text failed err=\(result.rawValue), falling back to pasteboard")
+        } else {
+            // No focused element found (common for Electron). Skip straight to paste.
+            BlitzLog.ax("AX: no focused element for replacement, falling back to pasteboard")
         }
 
-        let focused = focusedRef as! AXUIElement
-        let result = AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, newText as CFTypeRef)
-
-        if result != .success {
-            try await pasteboardFallback(newText, into: app)
-        }
+        // ⌘V paste fallback: works for all apps including Electron/Chromium.
+        try await pasteboardFallback(newText, into: app)
     }
 
     // MARK: - Position
@@ -196,34 +270,59 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         guard let app = resolveTargetApp() else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef else {
+        guard let focused = focusedElement(in: appElement) ?? focusedElementViaWindow(in: appElement) else {
             return mouseLocationFallback()
         }
-        let focused = focusedRef as! AXUIElement
 
-        // Attempt 1: bounds for the selected text range
-        if let rect = selectedTextBounds(in: focused) {
-            return rect
-        }
-
-        // Attempt 2: frame of the focused element itself
-        if let rect = elementFrame(focused) {
-            return rect
-        }
-
-        // Attempt 3: mouse cursor
+        if let rect = selectedTextBounds(in: focused) { return rect }
+        if let rect = elementFrame(focused) { return rect }
         return mouseLocationFallback()
     }
 
+    // MARK: - AX helpers
+
+    /// Returns the element holding keyboard focus within `element` (app or window).
+    private func focusedElement(in element: AXUIElement) -> AXUIElement? {
+        var ref: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &ref)
+        guard err == .success, let ref else {
+            BlitzLog.ax("AX: focused element query failed err=\(err.rawValue)")
+            return nil
+        }
+        return (ref as! AXUIElement)
+    }
+
+    /// Returns the focused UI element via the app's focused window.
+    /// Chromium/Electron often only exposes `kAXFocusedUIElement` on the window,
+    /// not on the application element.
+    private func focusedElementViaWindow(in appElement: AXUIElement) -> AXUIElement? {
+        var windowRef: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
+        guard err == .success, let windowRef else {
+            BlitzLog.ax("AX: focused window query failed err=\(err.rawValue)")
+            return nil
+        }
+        return focusedElement(in: windowRef as! AXUIElement)
+    }
+
+    /// Returns the selected text for `element`, or nil if unavailable.
+    private func selectedText(in element: AXUIElement) -> String? {
+        var ref: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &ref)
+        guard err == .success, let text = ref as? String else {
+            if err != .success {
+                BlitzLog.ax("AX: selected-text query failed err=\(err.rawValue)")
+            }
+            return nil
+        }
+        return text
+    }
+
     private func selectedTextBounds(in element: AXUIElement) -> CGRect? {
-        // Get the selected text range as an AXValue wrapping a CFRange.
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
               let rangeRef else { return nil }
 
-        // Ask for the bounding rect of that range.
         var boundsRef: CFTypeRef?
         let status = AXUIElementCopyParameterizedAttributeValue(
             element,
@@ -277,7 +376,7 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        app.activate()
+        app.activate(options: [.activateIgnoringOtherApps])
 
         // Brief delay so the target app comes to foreground before the keypress.
         try await Task.sleep(for: .milliseconds(100))
@@ -288,8 +387,8 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: true),
               let keyUp   = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: false) else {
             // CGEvent creation failed — restore the clipboard before giving up.
+            pasteboard.clearContents()
             if let saved {
-                pasteboard.clearContents()
                 pasteboard.setString(saved, forType: .string)
             }
             throw TextServiceError.replacementFailed("Failed to create keyboard event")
@@ -302,8 +401,8 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
 
         try await Task.sleep(for: .milliseconds(150))
 
+        pasteboard.clearContents()
         if let saved {
-            pasteboard.clearContents()
             pasteboard.setString(saved, forType: .string)
         }
     }

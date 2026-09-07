@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftData
 
@@ -32,6 +33,18 @@ struct BlitzOverlayView: View {
 
     let onDismiss: () -> Void
     let onOpenSettings: () -> Void
+    /// Called when the view's content changes size so the hosting panel can resize.
+    let onNeedsResize: () -> Void
+
+    init(
+        onDismiss: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void,
+        onNeedsResize: @escaping () -> Void = {}
+    ) {
+        self.onDismiss = onDismiss
+        self.onOpenSettings = onOpenSettings
+        self.onNeedsResize = onNeedsResize
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -57,6 +70,10 @@ struct BlitzOverlayView: View {
         .onExitCommand {
             if orchestrator.state.isTransforming { orchestrator.cancel() }
             onDismiss()
+        }
+        // Ask the panel to resize whenever we enter the preview state.
+        .onChange(of: orchestrator.state.isPreview) { _, isPreview in
+            if isPreview { onNeedsResize() }
         }
     }
 
@@ -129,6 +146,8 @@ struct BlitzOverlayView: View {
             idleContent
         case .transforming(let name):
             transformingContent(name: name)
+        case .preview(let name, _, let result):
+            previewContent(scenarioName: name, result: result)
         case .failed(let error):
             failedContent(error: error)
         }
@@ -223,6 +242,70 @@ struct BlitzOverlayView: View {
         .padding(.vertical, 14)
     }
 
+    // MARK: - Preview
+
+    private func previewContent(scenarioName: String, result: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.blitzBlue)
+                Text(scenarioName)
+                    .font(.callout)
+                    .fontWeight(.medium)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.blitzBlue, .blitzSkyBlue],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+            }
+
+            ScrollView {
+                Text(result)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(8)
+            }
+            .frame(maxHeight: 200)
+            .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(.secondary.opacity(0.15), lineWidth: 0.5)
+            )
+
+            HStack(spacing: 8) {
+                Button("Replace") {
+                    orchestrator.commit()
+                    onDismiss()
+                }
+                .buttonStyle(BlitzPrimaryButtonStyle())
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(result, forType: .string)
+                    onDismiss()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(BlitzOutlineButtonStyle())
+
+                Spacer()
+
+                Button("Discard") {
+                    orchestrator.cancel()
+                    onDismiss()
+                }
+                .buttonStyle(.plain)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+    }
+
     // MARK: - Failed
 
     private func failedContent(error: Error) -> some View {
@@ -309,6 +392,31 @@ private struct BlitzOutlineButtonStyle: ButtonStyle {
                     .background(
                         RoundedRectangle(cornerRadius: 7)
                             .fill(Color.blitzBlue.opacity(configuration.isPressed ? 0.1 : 0.04))
+                    )
+            )
+    }
+}
+
+/// Gradient-filled primary action button used for the Replace action in the preview state.
+private struct BlitzPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout)
+            .fontWeight(.semibold)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.blitzBlue.opacity(configuration.isPressed ? 0.75 : 1.0),
+                                Color.blitzSkyBlue.opacity(configuration.isPressed ? 0.75 : 1.0),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
             )
     }

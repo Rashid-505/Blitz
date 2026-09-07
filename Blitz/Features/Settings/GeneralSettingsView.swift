@@ -4,6 +4,7 @@ import ServiceManagement
 struct GeneralSettingsView: View {
 
     let shortcutManager: GlobalShortcutManager
+    @Environment(PreviewSettings.self) private var previewSettings
 
     @State private var isRecording = false
     @State private var keyMonitor: Any?
@@ -31,6 +32,12 @@ struct GeneralSettingsView: View {
                                 launchAtLogin = !enabled
                             }
                         }
+                }
+
+                LabeledContent("Preview before replacing") {
+                    @Bindable var settings = previewSettings
+                    Toggle("", isOn: $settings.isPreviewEnabled)
+                        .labelsHidden()
                 }
             }
         }
@@ -95,5 +102,6 @@ struct GeneralSettingsView: View {
 
 #Preview {
     GeneralSettingsView(shortcutManager: GlobalShortcutManager())
+        .environment(PreviewSettings())
         .frame(width: 500, height: 320)
 }

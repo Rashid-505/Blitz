@@ -39,6 +39,10 @@ final class BlitzOverlayPresenter {
         openSettingsAction = action
     }
 
+    var isVisible: Bool {
+        window?.isVisible ?? false
+    }
+
     // MARK: - Show / Hide
 
     func show(near sourceRect: CGRect?) {
@@ -59,7 +63,8 @@ final class BlitzOverlayPresenter {
             onOpenSettings: { [weak self] in
                 self?.hide()
                 self?.openSettingsAction?()
-            }
+            },
+            onNeedsResize: { [weak self] in self?.resizeToFit() }
         )
         .environment(orchestrator)
         .environment(providerStore)
@@ -69,7 +74,7 @@ final class BlitzOverlayPresenter {
         let panel = BlitzOverlayWindow()
         panel.setContent(overlayView)
 
-        // Size the panel to fit content after it has been set.
+        // Size the panel to fit the initial (idle) content.
         if let fittingSize = panel.contentView?.fittingSize, fittingSize != .zero {
             panel.setContentSize(fittingSize)
         } else {
@@ -154,6 +159,25 @@ final class BlitzOverlayPresenter {
         return NSScreen.screens.first { $0.frame.contains(cocoaPoint) }
     }
 
+    // MARK: - Panel resize
+
+    /// Re-measures the hosting view's fitting size and resizes the panel to match,
+    /// preserving the panel's top-left corner so it doesn't jump on screen.
+    private func resizeToFit() {
+        guard let panel = window, let contentView = panel.contentView else { return }
+        let newSize = contentView.fittingSize
+        guard newSize != .zero else { return }
+        // Preserve top-left corner: AppKit origin is bottom-left, so adjust y.
+        let oldFrame = panel.frame
+        let deltaHeight = newSize.height - oldFrame.size.height
+        let newOriginY = oldFrame.origin.y - deltaHeight
+        panel.setFrame(
+            CGRect(origin: CGPoint(x: oldFrame.origin.x, y: newOriginY), size: newSize),
+            display: true,
+            animate: false
+        )
+    }
+
     // MARK: - Click-outside dismissal
 
     private func installClickOutsideMonitor() {
@@ -165,8 +189,12 @@ final class BlitzOverlayPresenter {
         ) { [weak self] _ in
             guard let self, let panel = self.window else { return }
             let mouseLocation = NSEvent.mouseLocation
-            // Only dismiss when idle — preserve panel during active transformation.
-            if !panel.frame.contains(mouseLocation), !self.orchestrator.state.isTransforming {
+            // Do not dismiss while the user is actively transforming or reviewing a preview —
+            // an accidental mis-click outside the panel must not silently discard their result.
+            let state = self.orchestrator.state
+            if !panel.frame.contains(mouseLocation),
+               !state.isTransforming,
+               !state.isPreview {
                 Task { @MainActor in self.hide() }
             }
         }
@@ -186,12 +214,21 @@ final class BlitzOverlayPresenter {
         completionObserver = Task { [weak self] in
             guard let self else { return }
             var wasTransforming = false
+            // Once we enter preview the auto-dismiss logic is disabled:
+            // the overlay's Replace/Discard buttons take responsibility for hiding.
+            var enteredPreview = false
             while !Task.isCancelled {
                 let currentState = await MainActor.run { self.orchestrator.state }
                 if currentState.isTransforming {
                     wasTransforming = true
                 }
-                if wasTransforming, case .idle = currentState {
+                if currentState.isPreview {
+                    enteredPreview = true
+                    // Resize the panel now that the preview content is rendered.
+                    await MainActor.run { self.resizeToFit() }
+                }
+                // Auto-dismiss only when going transforming → idle without a preview step.
+                if wasTransforming, !enteredPreview, case .idle = currentState {
                     await MainActor.run { self.hide() }
                     return
                 }

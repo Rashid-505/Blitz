@@ -38,9 +38,19 @@ struct MenuBarView: View {
         case .idle:
             EmptyView()
         case .transforming(let name):
-            Text("Running \(name)...")
+            Text("Running \(name)…")
                 .foregroundStyle(.secondary)
             Button("Cancel") { orchestrator.cancel() }
+            Divider()
+        case .preview(let name, _, let result):
+            Text("\(name) — Preview")
+                .foregroundStyle(.secondary)
+            Text(result)
+                .lineLimit(5)
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Button("Replace") { orchestrator.commit() }
+            Button("Discard") { orchestrator.cancel() }
             Divider()
         case .failed(let error):
             Text(error.localizedDescription)

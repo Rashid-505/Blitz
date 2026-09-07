@@ -8,6 +8,7 @@ struct BlitzApp: App {
     private let sharedContainer: ModelContainer
     private let scenarioStore: ScenarioStore
     private let providerStore: ProviderStore
+    private let previewSettings: PreviewSettings
     private let textService: AccessibilityTextService
     private let orchestrator: TransformationOrchestrator
     private let shortcutManager: GlobalShortcutManager
@@ -23,11 +24,15 @@ struct BlitzApp: App {
         scenarioStore = ScenarioStore(modelContext: sharedContainer.mainContext)
         providerStore = ProviderStore()
 
+        let settings = PreviewSettings()
+        previewSettings = settings
+
         let service = AccessibilityTextService()
         textService = service
         orchestrator = TransformationOrchestrator(
             textSelectionService: service,
-            textReplacementService: service
+            textReplacementService: service,
+            preferences: settings
         )
 
         shortcutManager = GlobalShortcutManager()
@@ -53,8 +58,16 @@ struct BlitzApp: App {
         // Wire the global shortcut → overlay. Capturing strongly is intentional;
         // both objects live for the app's lifetime and there is no retain cycle.
         shortcutManager.onActivate = {
-            let rect = service.getSelectionScreenRect()
-            presenter.show(near: rect)
+            Task { @MainActor in
+                // Capture the selection while the target app still holds keyboard
+                // focus. Skip when the overlay is already visible — re-reading would
+                // briefly activate the target app with no benefit.
+                if !presenter.isVisible {
+                    await service.preReadSelection()
+                }
+                let rect = service.getSelectionScreenRect()
+                presenter.show(near: rect)
+            }
         }
         shortcutManager.register()
     }
@@ -73,6 +86,7 @@ struct BlitzApp: App {
             SettingsView(shortcutManager: shortcutManager)
                 .environment(scenarioStore)
                 .environment(providerStore)
+                .environment(previewSettings)
         }
         .modelContainer(sharedContainer)
     }

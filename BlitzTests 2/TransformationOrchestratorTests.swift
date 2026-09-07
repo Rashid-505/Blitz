@@ -49,11 +49,13 @@ final class MockAIProvider: AIProvider {
 
 private func makeOrchestrator(
     selection: MockTextSelectionService = MockTextSelectionService(),
-    replacement: MockTextReplacementService = MockTextReplacementService()
+    replacement: MockTextReplacementService = MockTextReplacementService(),
+    previewEnabled: Bool = false
 ) -> TransformationOrchestrator {
     TransformationOrchestrator(
         textSelectionService: selection,
-        textReplacementService: replacement
+        textReplacementService: replacement,
+        preferences: PreviewSettings(isPreviewEnabled: previewEnabled)
     )
 }
 
@@ -69,6 +71,8 @@ private func makeScenario() throws -> Scenario {
 
 @Suite("TransformationOrchestrator")
 struct TransformationOrchestratorTests {
+
+    // MARK: Existing one-shot tests (preview disabled)
 
     @Test("Successful transformation replaces text and returns to idle")
     func successPath() async throws {
@@ -221,5 +225,127 @@ struct TransformationOrchestratorTests {
         await orchestrator.currentTask?.value
 
         #expect(firstTask.isCancelled)
+    }
+
+    // MARK: Preview tests
+
+    @Test("Preview enabled: transform enters .preview state without writing")
+    func previewEnabled_entersPreviewWithoutWriting() async throws {
+        let selection = MockTextSelectionService()
+        selection.textToReturn = "helo wrold"
+        let replacement = MockTextReplacementService()
+        let provider = MockAIProvider()
+        provider.transformedText = "Hello world."
+
+        let orchestrator = makeOrchestrator(
+            selection: selection,
+            replacement: replacement,
+            previewEnabled: true
+        )
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        guard case .preview(let name, let original, let result) = orchestrator.state else {
+            Issue.record("Expected .preview state, got \(orchestrator.state)")
+            return
+        }
+        #expect(name == "Fix Grammar")
+        #expect(original == "helo wrold")
+        #expect(result == "Hello world.")
+        #expect(replacement.replacedWith == nil, "Text must not be written before commit()")
+    }
+
+    @Test("Preview enabled: commit() writes the result and returns to .idle")
+    func previewEnabled_commitWritesAndReturnsToIdle() async throws {
+        let replacement = MockTextReplacementService()
+        let provider = MockAIProvider()
+        provider.transformedText = "Hello world."
+
+        let orchestrator = makeOrchestrator(
+            replacement: replacement,
+            previewEnabled: true
+        )
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        // Confirm we're in preview before committing.
+        guard case .preview = orchestrator.state else {
+            Issue.record("Expected .preview state before commit")
+            return
+        }
+
+        orchestrator.commit()
+        await orchestrator.currentTask?.value
+
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected .idle after commit(), got \(orchestrator.state)")
+        }
+        #expect(replacement.replacedWith == "Hello world.")
+    }
+
+    @Test("Preview enabled: cancel() from preview writes nothing and returns to .idle")
+    func previewEnabled_cancelFromPreviewWritesNothing() async throws {
+        let replacement = MockTextReplacementService()
+
+        let orchestrator = makeOrchestrator(
+            replacement: replacement,
+            previewEnabled: true
+        )
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: MockAIProvider())
+        await orchestrator.currentTask?.value
+
+        guard case .preview = orchestrator.state else {
+            Issue.record("Expected .preview state before cancel")
+            return
+        }
+
+        orchestrator.cancel()
+
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected .idle after cancel() from preview, got \(orchestrator.state)")
+        }
+        #expect(replacement.replacedWith == nil, "cancel() from preview must not write anything")
+    }
+
+    @Test("Preview disabled: transform writes immediately (one-shot behavior unchanged)")
+    func previewDisabled_oneShotBehaviorUnchanged() async throws {
+        let replacement = MockTextReplacementService()
+        let provider = MockAIProvider()
+        provider.transformedText = "Fixed text."
+
+        let orchestrator = makeOrchestrator(
+            replacement: replacement,
+            previewEnabled: false
+        )
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected .idle after one-shot transformation, got \(orchestrator.state)")
+        }
+        #expect(replacement.replacedWith == "Fixed text.")
+    }
+
+    @Test("commit() is a no-op when state is not .preview")
+    func commitIsNoOpOutsidePreview() async throws {
+        let replacement = MockTextReplacementService()
+        let orchestrator = makeOrchestrator(replacement: replacement)
+
+        // State is .idle — commit should be a no-op.
+        orchestrator.commit()
+        await orchestrator.currentTask?.value
+
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected state to remain .idle after no-op commit()")
+        }
+        #expect(replacement.replacedWith == nil)
     }
 }
