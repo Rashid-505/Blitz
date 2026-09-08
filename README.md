@@ -12,12 +12,13 @@ A macOS menu bar utility that transforms selected text using AI. Select any text
 
 - **Global keyboard shortcut** — press ⌥Space (configurable) from anywhere to trigger Blitz
 - **Floating overlay** — a lightweight panel appears near your selected text; dismisses automatically after transformation
-- **AI-powered transformations** — Fix Grammar, Make Formal, Make Casual, Summarize, Translate to English, and any custom scenarios you define
+- **Preview before replacing** — optionally review the AI result before it replaces your text, with the ability to retry or revise
+- **AI-powered transformations** — Fix Grammar, Make Formal, Make Casual, Summarize, Translate to English, Optimized for Claude, and any custom scenarios you define
 - **Multiple AI providers** — OpenAI (GPT-4o mini, GPT-4o, GPT-4.1, o4-mini), Google Gemini (2.0 Flash, 2.5 Flash, 2.5 Pro), and Apple's on-device Foundation Model (Apple Intelligence, no API key or network needed)
 - **Custom scenarios** — add, edit, reorder, and delete your own transformation prompts
-- **Replacement history** — every transformation is logged so you can review or restore past results from Settings
+- **Replacement history** — every transformation is logged so you can review, copy, or delete past results from Settings
+- **Automatic updates** — checks GitHub Releases for new versions and installs them in one click
 - **Secure API key storage** — keys stored exclusively in the macOS Keychain, never in UserDefaults, plists, or source code
-- **NSServices integration** — also available via right-click → Services → Blitz in compatible apps
 - **Menu bar access** — all scenarios and settings reachable from the menu bar icon
 
 ---
@@ -25,7 +26,7 @@ A macOS menu bar utility that transforms selected text using AI. Select any text
 ## Requirements
 
 - macOS 26.5 or later
-- An API key from OpenAI or Google Gemini (or both)
+- An API key from OpenAI or Google Gemini (or both), or an Apple Intelligence–capable Mac
 - Accessibility permission (System Settings → Privacy & Security → Accessibility)
 
 ---
@@ -85,26 +86,17 @@ API keys are stored in the macOS Keychain with `kSecAttrAccessible = WhenUnlocke
 2. Press **⌥Space** (Option + Space)
 3. The Blitz overlay appears near your selection
 4. Click a scenario to transform the text
-5. The original text is replaced with the AI result
-6. The overlay closes automatically
+5. If preview is enabled, review the result and click **Replace** to confirm — or **Retry** / **Discard**
+6. The original text is replaced with the AI result and the overlay closes
 
 Press **Escape** or click outside the overlay to dismiss without making changes.
 
-### Menu bar (secondary)
+### Menu bar
 
 1. Select text in another app
 2. Click the ⚡ icon in the menu bar
 3. Click a scenario name
 4. The text is transformed and replaced in place
-
-### Right-click / Services (fallback)
-
-In native AppKit apps (TextEdit, Notes, Terminal, Xcode, etc.):
-
-1. Select text
-2. Right-click → **Services** → **Blitz** → choose a scenario
-
-> **Note:** Services do not appear in browsers (Chrome, Firefox, Safari) or Electron-based apps (VS Code, Slack). Use the keyboard shortcut or menu bar instead.
 
 ---
 
@@ -130,6 +122,17 @@ Click **Change**, then press any key combination with at least one modifier key 
 
 If you delete all built-in scenarios, they are re-seeded on next launch.
 
+### Built-in scenarios
+
+| Scenario | What it does |
+|---|---|
+| Fix Grammar | Corrects grammar and punctuation without changing meaning |
+| Make Formal | Rewrites text in a formal, professional tone |
+| Make Casual | Rewrites text in a casual, conversational tone |
+| Summarize | Produces a concise summary |
+| Translate to English | Translates any language to English |
+| Optimized for Claude | Restructures a draft prompt for use with Claude Code |
+
 ### Writing scenario instructions
 
 The instruction field is the system prompt sent to the AI. Blitz appends the selected text as the user message. Tips:
@@ -137,6 +140,24 @@ The instruction field is the system prompt sent to the AI. Blitz appends the sel
 - Be specific: *"Fix only grammar and punctuation. Do not change the meaning, tone, or wording."*
 - End with: *"Return only the result, with no commentary or explanation."*
 - The AI respects these constraints across all supported models.
+
+---
+
+## Automatic updates
+
+Blitz checks GitHub Releases for newer versions. To check manually:
+
+- **Menu bar** → **Check for Updates…**
+- **Settings → General → Updates → Check for Updates**
+
+When an update is available, click **Download & Install**. Blitz will:
+
+1. Download the `.dmg` from GitHub Releases
+2. Mount the disk image
+3. Launch a background installer script
+4. Quit itself — the script copies the new bundle over `/Applications/Blitz.app` and relaunches
+
+No manual downloads or drag-and-drop needed.
 
 ---
 
@@ -148,6 +169,9 @@ The instruction field is the system prompt sent to the AI. Blitz appends the sel
 |---|---|
 | Activation shortcut | Global hotkey to trigger the overlay. Click **Change** to record a new one. |
 | Launch at login | Toggle whether Blitz starts automatically when you log in. |
+| Preview before replacing | When on, shows the AI result in the overlay before committing the replacement. |
+| Version | Displays the currently installed version. |
+| Updates | Check for updates and install new releases in one click. |
 
 ### Scenarios
 
@@ -157,28 +181,32 @@ Full list of transformation scenarios. Reorder, edit, enable/disable, or delete 
 
 | Setting | Description |
 |---|---|
-| AI Provider | Choose between OpenAI and Google Gemini. |
+| AI Provider | Choose between OpenAI, Google Gemini, and Apple Intelligence. |
 | Model | Select the specific model for the active provider. |
 | API Key | Paste and save your API key. Stored in Keychain. |
 | Test Connection | Makes a real API call to verify the key and model are working. |
+
+### History
+
+Lists all past transformations in reverse chronological order. Each entry shows the scenario name, timestamp, and a preview of the result. You can copy a result to the clipboard or delete individual entries. Use **Clear All History** to wipe the entire log.
 
 ---
 
 ## Application compatibility
 
-| App | Keyboard shortcut | Menu bar | Right-click Services |
-|---|---|---|---|
-| TextEdit | ✅ | ✅ | ✅ |
-| Notes | ✅ | ✅ | ⚠️ (may vary) |
-| Xcode | ✅ | ✅ | ✅ |
-| Terminal | ✅ | ✅ | ✅ |
-| Mail | ✅ | ✅ | ✅ |
-| Safari | ✅ | ✅ | ❌ |
-| Chrome / Firefox | ✅ | ✅ | ❌ |
-| VS Code | ✅ | ✅ | ❌ |
-| Slack | ✅ | ✅ | ❌ |
+| App | Keyboard shortcut | Menu bar |
+|---|---|---|
+| TextEdit | ✅ | ✅ |
+| Notes | ✅ | ✅ |
+| Xcode | ✅ | ✅ |
+| Terminal | ✅ | ✅ |
+| Mail | ✅ | ✅ |
+| Safari | ✅ | ✅ |
+| Chrome / Firefox | ✅ | ✅ |
+| VS Code | ✅ | ✅ |
+| Slack | ✅ | ✅ |
 
-For browsers and Electron apps, the keyboard shortcut is the most reliable method. The overlay position falls back to the mouse cursor location since these apps do not expose text position through the Accessibility API.
+For browsers and Electron apps, the overlay position falls back to the mouse cursor location since these apps do not expose text position through the Accessibility API.
 
 ---
 
@@ -189,31 +217,36 @@ BlitzApp (App entry point)
 │
 ├── GlobalShortcutManager        — Carbon RegisterEventHotKey, ⌥Space default
 ├── AccessibilityTextService     — AXUIElement read/write + CGEvent Cmd+V fallback
-├── TransformationOrchestrator   — Pipeline: read → AI transform → replace
+├── TransformationOrchestrator   — Pipeline: read → AI transform → preview → replace
 ├── BlitzOverlayPresenter        — NSPanel lifecycle, positioning, dismissal
+├── UpdateChecker                — GitHub Releases API, DMG download, shell installer
 │
 ├── Domain
 │   ├── AIProvider (protocol)    — nonisolated transform(text:instruction:)
 │   ├── ProviderStore            — Active provider + model, Keychain API keys
 │   ├── ScenarioStore            — SwiftData CRUD, seeding, ordering
+│   ├── PreviewSettings          — Preview-before-replace toggle, persisted
+│   ├── ReplacementHistoryStore  — SwiftData log of past transformations
 │   └── GlobalShortcutManager    — Shortcut registration + UserDefaults persistence
 │
 ├── Infrastructure
 │   ├── OpenAIProvider           — Chat Completions API, all models
 │   ├── GeminiProvider           — generateContent API, URLComponents for key encoding
+│   ├── AppleFoundationModelProvider — on-device FoundationModels framework
 │   ├── PromptBuilder            — System + user prompt construction
-│   └── KeychainStore            — Security framework, kSecAttrSynchronizable = false
+│   ├── KeychainStore            — Security framework, kSecAttrSynchronizable = false
+│   └── UpdateChecker            — GitHub API, URLSession download, hdiutil, bash installer
 │
 └── Features
     ├── MenuBar / MenuBarView    — MenuBarExtra (.menu style)
-    ├── Overlay / BlitzOverlayView — SwiftUI panel content (idle/transforming/failed)
-    └── Settings                 — General, Scenarios, Providers tabs
+    ├── Overlay / BlitzOverlayView — SwiftUI panel content (idle/transforming/preview/failed)
+    └── Settings                 — General, Scenarios, Providers, History tabs
 ```
 
 ### Key design decisions
 
 **Global shortcut via Carbon `RegisterEventHotKey`**
-The only mechanism that works in sandboxed apps without requiring Input Monitoring permission. `NSEvent.addGlobalMonitorForEvents` requires that permission for keyboard events; `RegisterEventHotKey` does not.
+The only mechanism that works without requiring Input Monitoring permission. `NSEvent.addGlobalMonitorForEvents` requires that permission for keyboard events; `RegisterEventHotKey` does not.
 
 **Floating overlay via `NSPanel` with `.nonactivatingPanel`**
 Clicking inside the panel does not steal focus from the active application, so the text selection in the user's app is preserved while the overlay is visible.
@@ -223,6 +256,9 @@ Clicking inside the panel does not steal focus from the active application, so t
 
 **API keys in Keychain only**
 `kSecAttrSynchronizable: kCFBooleanFalse` prevents iCloud Keychain sync. `kSecAttrAccessibleWhenUnlocked` ensures keys are available only when the screen is unlocked. Keys are never written to UserDefaults, plists, logs, or source code.
+
+**Self-updating via detached installer script**
+Because the app is not sandboxed, `hdiutil` and `Process` are available. After downloading a DMG, Blitz mounts it, writes a bash script that polls `kill -0 <PID>` to detect when the app has quit, then `cp -Rp`s the new bundle into place and relaunches. No SPM dependencies required.
 
 **Overlay positioning fallback chain**
 1. Selected text bounding rect via AX parameterized attribute (`kAXBoundsForRangeParameterizedAttribute`) — works in NSTextView apps
@@ -239,15 +275,18 @@ Blitz/
 ├── Blitz.xcodeproj/
 └── Blitz/
     ├── App/
-    │   └── AppDelegate.swift            NSServices handlers
+    │   └── AppDelegate.swift
     ├── Domain/
     │   ├── AIProvider.swift             Protocol + ProviderID + ModelOption
     │   ├── AIError.swift                Typed error cases
     │   ├── GlobalShortcutManager.swift  Carbon hotkey, persistence
     │   ├── ProviderStore.swift          Active provider, model, Keychain access
+    │   ├── PreviewSettings.swift        Preview toggle, @Observable
     │   ├── Scenario.swift               SwiftData model
     │   ├── ScenarioStore.swift          CRUD + seeding
-    │   ├── BuiltInScenarios.swift       5 default scenario definitions
+    │   ├── BuiltInScenarios.swift       6 default scenario definitions
+    │   ├── ReplacementEntry.swift       SwiftData model for history entries
+    │   ├── ReplacementHistoryStore.swift  History CRUD, enabled toggle
     │   ├── TextService.swift            Protocols + error enum
     │   └── TransformationOrchestrator.swift
     ├── Features/
@@ -258,17 +297,21 @@ Blitz/
     │       ├── ProvidersSettingsView.swift
     │       ├── ScenariosSettingsView.swift
     │       ├── ScenarioEditView.swift
+    │       ├── HistorySettingsView.swift
     │       └── SettingsView.swift
     ├── Infrastructure/
     │   ├── Accessibility/AccessibilityTextService.swift
     │   ├── AI/
     │   │   ├── OpenAIProvider.swift
     │   │   ├── GeminiProvider.swift
+    │   │   ├── AppleFoundationModelProvider.swift
     │   │   └── PromptBuilder.swift
     │   ├── Keychain/KeychainStore.swift
-    │   └── Overlay/
-    │       ├── BlitzOverlayWindow.swift
-    │       └── BlitzOverlayPresenter.swift
+    │   ├── Overlay/
+    │   │   ├── BlitzOverlayWindow.swift
+    │   │   └── BlitzOverlayPresenter.swift
+    │   └── Update/
+    │       └── UpdateChecker.swift
     ├── BlitzApp.swift
     ├── Info.plist
     └── Blitz.entitlements
@@ -280,49 +323,11 @@ Blitz/
 
 | Setting | Value | Reason |
 |---|---|---|
-| `GENERATE_INFOPLIST_FILE` | `NO` | Manual Info.plist required for NSServices entries |
+| `GENERATE_INFOPLIST_FILE` | `NO` | Manual Info.plist used |
 | `INFOPLIST_FILE` | `Blitz/Info.plist` | Points to the manual plist |
 | `CODE_SIGN_ENTITLEMENTS` | `Blitz/Blitz.entitlements` | Explicit entitlements file |
-| `ENABLE_APP_SANDBOX` | `YES` | App sandbox active |
+| `ENABLE_APP_SANDBOX` | `NO` | Sandbox disabled — required for `hdiutil`, `Process`, and the self-update installer |
 | `ENABLE_HARDENED_RUNTIME` | `YES` | Required for notarization |
-
-### Active entitlements
-
-| Entitlement | Reason |
-|---|---|
-| `com.apple.security.app-sandbox` | App Sandbox |
-| `com.apple.security.network.client` | Required for API calls to OpenAI / Gemini |
-| `com.apple.security.files.user-selected.read-only` | User-selected file access |
-
----
-
-## Development notes
-
-### After registering new NSServices entries
-
-If you add or modify `NSServices` entries in `Info.plist`, macOS Launch Services must be notified:
-
-```bash
-# Force re-register the app bundle
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-  -f ~/Library/Developer/Xcode/DerivedData/Blitz-*/Build/Products/Debug/Blitz.app
-
-# Flush the services menu cache
-/System/Library/CoreServices/pbs -flush
-```
-
-Then quit and relaunch Blitz.
-
-### Running tests
-
-A `BlitzTests` unit test target is included with tests for:
-- `TransformationOrchestrator` (9 tests) — pipeline states, cancellation, error paths
-- `KeychainStore` (6 tests) — store, retrieve, delete, update
-- `OpenAIProvider` (8 tests) — request building, response parsing, error mapping
-- `GeminiProvider` (8 tests) — URL construction, response parsing, error mapping
-- `PromptBuilder` (7 tests) — prompt construction
-
-To run them, the `BlitzTests` target must be added to the Xcode scheme: **Product → Scheme → Edit Scheme → Test → add BlitzTests**.
 
 ---
 
@@ -330,11 +335,11 @@ To run them, the `BlitzTests` target must be added to the Xcode scheme: **Produc
 
 | Limitation | Detail |
 |---|---|
-| **Custom scenarios in NSServices** | The right-click Services menu is static (defined at build time in Info.plist). Only the 5 built-in scenarios appear there. Custom scenarios work via the keyboard shortcut and menu bar. |
 | **Text position in browsers** | Chrome, Firefox, Safari, and Electron apps do not expose text selection coordinates through the Accessibility API. The overlay falls back to the mouse cursor position. |
 | **Non-AppKit text fields** | Some apps use custom renderers that block AX attribute writes. Blitz falls back to a clipboard paste (Cmd+V). This temporarily modifies the clipboard and restores it after ~250 ms. |
-| **Sandbox + Accessibility** | The Accessibility permission is a user privacy grant in System Settings. The app sandbox itself does not block AX API calls once the user has granted permission. |
 | **Shortcut recording** | The shortcut recorder captures the first valid combination. There is no conflict detection against system shortcuts. If a chosen shortcut conflicts with another app, the system shortcut typically takes precedence. |
+| **Update requires /Applications** | The self-update installer replaces the bundle at its current path. If Blitz is run from a location other than `/Applications`, the update will install there instead. |
+| **Apple Intelligence availability** | The on-device Foundation Model provider requires an Apple Intelligence–capable Mac running macOS 26 or later. The option is hidden automatically if the capability is unavailable. |
 
 ---
 
