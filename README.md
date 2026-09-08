@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="128" alt="Blitz logo">
+</p>
+
 # Blitz
 
 A macOS menu bar utility that transforms selected text using AI. Select any text in any app, press a keyboard shortcut, choose a transformation, and the result replaces your selection — without leaving the app you're working in.
@@ -9,8 +13,9 @@ A macOS menu bar utility that transforms selected text using AI. Select any text
 - **Global keyboard shortcut** — press ⌥Space (configurable) from anywhere to trigger Blitz
 - **Floating overlay** — a lightweight panel appears near your selected text; dismisses automatically after transformation
 - **AI-powered transformations** — Fix Grammar, Make Formal, Make Casual, Summarize, Translate to English, and any custom scenarios you define
-- **Multiple AI providers** — OpenAI (GPT-4o mini, GPT-4o, GPT-4.1, o4-mini) and Google Gemini (2.0 Flash, 2.5 Flash, 2.5 Pro)
+- **Multiple AI providers** — OpenAI (GPT-4o mini, GPT-4o, GPT-4.1, o4-mini), Google Gemini (2.0 Flash, 2.5 Flash, 2.5 Pro), and Apple's on-device Foundation Model (Apple Intelligence, no API key or network needed)
 - **Custom scenarios** — add, edit, reorder, and delete your own transformation prompts
+- **Replacement history** — every transformation is logged so you can review or restore past results from Settings
 - **Secure API key storage** — keys stored exclusively in the macOS Keychain, never in UserDefaults, plists, or source code
 - **NSServices integration** — also available via right-click → Services → Blitz in compatible apps
 - **Menu bar access** — all scenarios and settings reachable from the menu bar icon
@@ -27,11 +32,18 @@ A macOS menu bar utility that transforms selected text using AI. Select any text
 
 ## Installation
 
+### Download (recommended)
+
+1. Grab the latest `.dmg` from the [Releases](https://github.com/Rashid-505/Blitz/releases) page.
+2. Open the `.dmg` and drag **Blitz.app** into `/Applications`.
+3. Launch Blitz. Since the build isn't notarized, right-click the app → **Open** the first time (or **System Settings → Privacy & Security → Open Anyway**) to bypass Gatekeeper.
+4. Blitz appears as a bolt icon in the menu bar.
+
 ### Build from source
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/rashidhuseynov/Blitz.git
+   git clone https://github.com/Rashid-505/Blitz.git
    cd Blitz
    ```
 
