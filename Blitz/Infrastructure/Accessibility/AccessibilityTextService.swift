@@ -21,6 +21,12 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
     // Consumed by the first readSelectedText() call and then cleared.
     private var cachedSelectedText: String?
 
+    // AX element and selection range captured in preReadSelection(). Used in
+    // pasteboardFallback() to restore focus and the original selection so ⌘V
+    // replaces the selection rather than inserting at a lost cursor position.
+    private var cachedFocusedElement: AXUIElement? = nil
+    private var cachedSelectionRangeRef: CFTypeRef? = nil
+
     init() {
         // Track the last non-Blitz frontmost app so we can target it after
         // the menu bar opens and Blitz becomes the frontmost process.
@@ -57,9 +63,26 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
     /// `readSelectedText()` performs a live read as a fallback.
     func preReadSelection() async {
         cachedSelectedText = nil
+        cachedFocusedElement = nil
+        cachedSelectionRangeRef = nil
         BlitzLog.ax("preRead: capturing selection before overlay appears")
         cachedSelectedText = try? await readSelectedTextCore()
-        BlitzLog.ax("preRead: cached \(cachedSelectedText.map { "\($0.count) chars" } ?? "nil")")
+        // Capture the focused AX element and its selection range while the target app
+        // still has keyboard focus. pasteboardFallback() uses these to restore focus
+        // and the original selection in Chrome / Teams before posting ⌘V, so the paste
+        // replaces the original text rather than inserting at a lost cursor position.
+        if let app = resolveTargetApp() {
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            let focused = focusedElement(in: appElement) ?? focusedElementViaWindow(in: appElement)
+            cachedFocusedElement = focused
+            if let el = focused {
+                var rangeRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success {
+                    cachedSelectionRangeRef = rangeRef
+                }
+            }
+        }
+        BlitzLog.ax("preRead: cached \(cachedSelectedText.map { "\($0.count) chars" } ?? "nil"), element=\(cachedFocusedElement != nil), range=\(cachedSelectionRangeRef != nil)")
     }
 
     // MARK: - TextSelectionService
@@ -178,7 +201,7 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         // Without re-activation ⌘C is delivered to the Blitz panel, not Teams/Chrome.
         // Explicit activation restores keyboard focus to the target app.
         BlitzLog.ax("Pasteboard: activating \(app.localizedName ?? "?") (isActive=\(app.isActive))")
-        app.activate(options: [.activateIgnoringOtherApps])
+        app.activate(from: NSRunningApplication.current)
         // Wait for the OS to transfer keyboard focus before posting the keystroke.
         try await Task.sleep(for: .milliseconds(120))
 
@@ -243,11 +266,20 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         // Check both the app-element path and the window path for Chromium/Electron.
         let focusedEl = focusedElement(in: appElement) ?? focusedElementViaWindow(in: appElement)
         if let focused = focusedEl {
+            // Read the selection BEFORE writing so we can detect silent failures.
+            // Chromium and Electron often return .success but silently discard the
+            // write — the only reliable confirmation is that the selected text changed.
+            let selectionBefore = selectedText(in: focused)
             let result = AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, newText as CFTypeRef)
-            if result == .success { return }
-            BlitzLog.ax("AX: set selected-text failed err=\(result.rawValue), falling back to pasteboard")
+            if result == .success {
+                if selectedText(in: focused) != selectionBefore {
+                    return  // Write confirmed: the selection actually changed.
+                }
+                BlitzLog.ax("AX: write returned success but selection is unchanged — falling back to pasteboard")
+            } else {
+                BlitzLog.ax("AX: set selected-text failed err=\(result.rawValue), falling back to pasteboard")
+            }
         } else {
-            // No focused element found (common for Electron). Skip straight to paste.
             BlitzLog.ax("AX: no focused element for replacement, falling back to pasteboard")
         }
 
@@ -376,10 +408,33 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        app.activate(options: [.activateIgnoringOtherApps])
+        // Order out Blitz's overlay panel before posting ⌘V.
+        //
+        // A hidden window cannot be the key window, so ordering it out forces
+        // the OS to immediately transfer key-window status back to Chrome / Teams.
+        // Calling resignKey() was insufficient: it is a notification method and
+        // does not reliably strip the panel of key status in all OS versions.
+        // The presenter's observeCompletionForAutoDismiss re-shows the panel when
+        // it detects the window became invisible while the state is .failed.
+        NSApp.windows.first { $0.isKeyWindow }?.orderOut(nil)
 
-        // Brief delay so the target app comes to foreground before the keypress.
-        try await Task.sleep(for: .milliseconds(100))
+        app.activate(from: NSRunningApplication.current)
+        // Give the window server time to complete the focus transfer.
+        try await Task.sleep(for: .milliseconds(200))
+
+        // Attempt to restore the original text selection via the Accessibility API.
+        // When the Blitz panel was key, Chrome / Teams loses internal text-field focus
+        // even though the window remains visually active. Setting kAXSelectedTextRange
+        // on the pre-captured element both refocuses the field and re-establishes the
+        // selection, so ⌘V replaces the original text rather than inserting at an
+        // unknown cursor position.
+        if let el = cachedFocusedElement, let rangeRef = cachedSelectionRangeRef {
+            let restoreResult = AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, rangeRef)
+            BlitzLog.ax("Pasteboard: restore selection range result=\(restoreResult.rawValue)")
+            if restoreResult == .success {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        }
 
         let src = CGEventSource(stateID: .hidSystemState)
         let vKey: CGKeyCode = 9 // 'v'
@@ -399,7 +454,7 @@ final class AccessibilityTextService: TextSelectionService, TextReplacementServi
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
 
-        try await Task.sleep(for: .milliseconds(150))
+        try await Task.sleep(for: .milliseconds(200))
 
         pasteboard.clearContents()
         if let saved {

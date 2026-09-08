@@ -9,6 +9,7 @@ struct BlitzApp: App {
     private let scenarioStore: ScenarioStore
     private let providerStore: ProviderStore
     private let previewSettings: PreviewSettings
+    private let historyStore: ReplacementHistoryStore
     private let textService: AccessibilityTextService
     private let orchestrator: TransformationOrchestrator
     private let shortcutManager: GlobalShortcutManager
@@ -16,7 +17,7 @@ struct BlitzApp: App {
 
     init() {
         do {
-            sharedContainer = try ModelContainer(for: Scenario.self)
+            sharedContainer = try ModelContainer(for: Scenario.self, ReplacementEntry.self)
         } catch {
             fatalError("SwiftData container failed to initialize: \(error)")
         }
@@ -27,12 +28,16 @@ struct BlitzApp: App {
         let settings = PreviewSettings()
         previewSettings = settings
 
+        let history = ReplacementHistoryStore(modelContext: sharedContainer.mainContext)
+        historyStore = history
+
         let service = AccessibilityTextService()
         textService = service
         orchestrator = TransformationOrchestrator(
             textSelectionService: service,
             textReplacementService: service,
-            preferences: settings
+            preferences: settings,
+            historyStore: history
         )
 
         shortcutManager = GlobalShortcutManager()
@@ -87,6 +92,7 @@ struct BlitzApp: App {
                 .environment(scenarioStore)
                 .environment(providerStore)
                 .environment(previewSettings)
+                .environment(historyStore)
         }
         .modelContainer(sharedContainer)
     }

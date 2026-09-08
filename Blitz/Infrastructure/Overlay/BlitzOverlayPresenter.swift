@@ -21,7 +21,9 @@ final class BlitzOverlayPresenter {
     private let modelContainer: ModelContainer
     private var openSettingsAction: (() -> Void)?
     private var clickOutsideMonitor: Any?
+    private var keyDownMonitor: Any?
     private var completionObserver: Task<Void, Never>?
+    private let navigationState = OverlayNavigationState()
 
     init(
         orchestrator: TransformationOrchestrator,
@@ -46,17 +48,17 @@ final class BlitzOverlayPresenter {
     // MARK: - Show / Hide
 
     func show(near sourceRect: CGRect?) {
-        // If already visible, just reposition and bring to front.
+        // If already visible, just reposition, reset navigation, and bring to front.
         if let existing = window, existing.isVisible {
-            if let rect = sourceRect {
-                position(window: existing, near: rect)
-            }
+            navigationState.highlightedIndex = 0
+            positionNearMouse(window: existing)
             existing.makeKey()
             return
         }
 
         // Reset orchestrator to idle so the overlay starts with the scenario list.
         orchestrator.cancel()
+        navigationState.highlightedIndex = 0
 
         let overlayView = BlitzOverlayView(
             onDismiss: { [weak self] in self?.hide() },
@@ -69,6 +71,7 @@ final class BlitzOverlayPresenter {
         .environment(orchestrator)
         .environment(providerStore)
         .environment(scenarioStore)
+        .environment(navigationState)
         .modelContainer(modelContainer)
 
         let panel = BlitzOverlayWindow()
@@ -81,22 +84,20 @@ final class BlitzOverlayPresenter {
             panel.setContentSize(CGSize(width: 240, height: 240))
         }
 
-        if let rect = sourceRect {
-            position(window: panel, near: rect)
-        } else {
-            centerOnScreen(panel)
-        }
+        positionNearMouse(window: panel)
 
         window = panel
         panel.orderFrontRegardless()
         panel.makeKey()
 
         installClickOutsideMonitor()
+        installKeyDownMonitor()
         observeCompletionForAutoDismiss()
     }
 
     func hide() {
         removeClickOutsideMonitor()
+        removeKeyDownMonitor()
         completionObserver?.cancel()
         completionObserver = nil
         window?.orderOut(nil)
@@ -105,72 +106,73 @@ final class BlitzOverlayPresenter {
 
     // MARK: - Positioning
 
-    private func position(window panel: NSPanel, near rect: CGRect) {
-        guard let screen = screenContaining(rect) ?? NSScreen.main else {
-            centerOnScreen(panel)
-            return
-        }
+    /// Positions the panel above the current mouse cursor, falling back to below
+    /// when there is insufficient space, then clamping within the visible screen.
+    private func positionNearMouse(window panel: NSPanel) {
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+        guard let screen else { return }
 
-        let panelSize = panel.frame.size
-        let screenFrame = screen.visibleFrame
-        let screenHeight = screen.frame.height
+        let sf = screen.visibleFrame
+        let ps = panel.frame.size
+        let gap: CGFloat = 8
 
-        // AX / Quartz coordinates have origin top-left; AppKit has origin bottom-left.
-        let cocoaY = screenHeight - rect.maxY
-        let gap: CGFloat = 6
-
-        // Prefer positioning below the selection.
+        // Prefer above: panel bottom = mouse.y + gap
         var origin = CGPoint(
-            x: rect.minX,
-            y: cocoaY - panelSize.height - gap
+            x: mouse.x - ps.width / 2,
+            y: mouse.y + gap
         )
 
-        // Clamp horizontally within the visible screen.
-        origin.x = min(origin.x, screenFrame.maxX - panelSize.width)
-        origin.x = max(origin.x, screenFrame.minX)
-
-        // If below goes off-screen, flip above.
-        if origin.y < screenFrame.minY {
-            origin.y = cocoaY + rect.height + gap
+        // If panel would overflow the top of the visible area, flip below.
+        if origin.y + ps.height > sf.maxY {
+            origin.y = mouse.y - ps.height - gap
         }
 
-        // Clamp vertically.
-        origin.y = min(origin.y, screenFrame.maxY - panelSize.height)
-        origin.y = max(origin.y, screenFrame.minY)
+        // Clamp within visible screen bounds.
+        origin.x = min(max(origin.x, sf.minX), sf.maxX - ps.width)
+        origin.y = min(max(origin.y, sf.minY), sf.maxY - ps.height)
 
         panel.setFrameOrigin(origin)
     }
 
-    private func centerOnScreen(_ panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
-        let sf = screen.visibleFrame
-        let ps = panel.frame.size
-        panel.setFrameOrigin(CGPoint(
-            x: sf.midX - ps.width / 2,
-            y: sf.midY - ps.height / 2
-        ))
-    }
-
-    /// Finds the NSScreen whose frame contains the Quartz-coordinate rect midpoint.
-    private func screenContaining(_ rect: CGRect) -> NSScreen? {
-        guard let primary = NSScreen.screens.first else { return nil }
-        // Convert Quartz midpoint to Cocoa coordinates using the primary screen height.
-        let cocoaPoint = CGPoint(x: rect.midX, y: primary.frame.height - rect.midY)
-        return NSScreen.screens.first { $0.frame.contains(cocoaPoint) }
-    }
-
     // MARK: - Panel resize
 
-    /// Re-measures the hosting view's fitting size and resizes the panel to match,
-    /// preserving the panel's top-left corner so it doesn't jump on screen.
+    /// Re-measures the hosting view's fitting size and resizes the panel to match.
+    ///
+    /// Expansion direction:
+    /// - Default: anchor the **top**-left corner and grow downward (origin.y decreases).
+    /// - Fallback: if growing downward would clip below the visible screen, anchor the
+    ///   **bottom** instead and grow upward (origin.y stays fixed).
+    /// The result is always clamped within the screen's visible frame.
     private func resizeToFit() {
         guard let panel = window, let contentView = panel.contentView else { return }
         let newSize = contentView.fittingSize
         guard newSize != .zero else { return }
-        // Preserve top-left corner: AppKit origin is bottom-left, so adjust y.
+
         let oldFrame = panel.frame
         let deltaHeight = newSize.height - oldFrame.size.height
-        let newOriginY = oldFrame.origin.y - deltaHeight
+
+        // Resolve the screen that owns the panel's top-left anchor point.
+        let topLeft = CGPoint(x: oldFrame.minX, y: oldFrame.maxY)
+        let screen = NSScreen.screens.first { $0.frame.contains(topLeft) } ?? NSScreen.main
+        let visibleFrame = screen?.visibleFrame ?? oldFrame
+        let screenMinY = visibleFrame.minY
+        let screenMaxY = visibleFrame.maxY
+
+        // Try top-anchored growth (origin moves down, top stays fixed).
+        var newOriginY = oldFrame.origin.y - deltaHeight
+
+        // If that clips below the screen, switch to bottom-anchored growth (origin
+        // stays, window top moves up). This handles windows positioned above the
+        // text selection — they should open further upward, not off-screen downward.
+        if newOriginY < screenMinY {
+            newOriginY = oldFrame.origin.y
+        }
+
+        // Clamp within the visible screen so neither edge escapes.
+        newOriginY = max(newOriginY, screenMinY)
+        newOriginY = min(newOriginY, screenMaxY - newSize.height)
+
         panel.setFrame(
             CGRect(origin: CGPoint(x: oldFrame.origin.x, y: newOriginY), size: newSize),
             display: true,
@@ -194,7 +196,8 @@ final class BlitzOverlayPresenter {
             let state = self.orchestrator.state
             if !panel.frame.contains(mouseLocation),
                !state.isTransforming,
-               !state.isPreview {
+               !state.isPreview,
+               !state.isFailed {
                 Task { @MainActor in self.hide() }
             }
         }
@@ -207,32 +210,136 @@ final class BlitzOverlayPresenter {
         }
     }
 
+    // MARK: - Keyboard navigation
+
+    private func installKeyDownMonitor() {
+        removeKeyDownMonitor()
+        // Local monitors run on the main thread and only see events processed by
+        // our own app's windows. No Input Monitoring permission is required.
+        // We use this instead of SwiftUI .keyboardShortcut because the focus
+        // system in a non-activating panel is unreliable.
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.handleKeyDown(event)
+        }
+    }
+
+    private func removeKeyDownMonitor() {
+        if let monitor = keyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyDownMonitor = nil
+        }
+    }
+
+    /// Returns `nil` to consume the event (prevent further dispatch), or the original
+    /// event to let it fall through to SwiftUI's responder chain (e.g. Escape → `.onExitCommand`).
+    private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        // Only intercept events directed at our overlay panel.
+        guard window?.isKeyWindow == true else { return event }
+
+        // Never block input while a transformation is running — let Escape reach
+        // `.onExitCommand` so the user can still cancel.
+        guard case .idle = orchestrator.state else { return event }
+
+        let scenarios = scenarioStore.enabledScenarios
+        guard !scenarios.isEmpty else { return event }
+
+        switch event.keyCode {
+        case 126: // ↑ Up arrow
+            navigationState.highlightedIndex = max(0, navigationState.highlightedIndex - 1)
+            return nil
+        case 125: // ↓ Down arrow
+            navigationState.highlightedIndex = min(scenarios.count - 1, navigationState.highlightedIndex + 1)
+            return nil
+        case 36, 76: // Return / numpad Enter
+            triggerScenario(at: navigationState.highlightedIndex)
+            return nil
+        default:
+            // Digit shortcuts 1–9 with no modifier keys held.
+            let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if mods.isEmpty,
+               let char = event.charactersIgnoringModifiers,
+               let digit = Int(char),
+               digit >= 1, digit <= 9 {
+                let index = digit - 1
+                if index < scenarios.count {
+                    triggerScenario(at: index)
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func triggerScenario(at index: Int) {
+        let scenarios = scenarioStore.enabledScenarios
+        guard index < scenarios.count else { return }
+        let scenario = scenarios[index]
+        guard let provider = providerStore.makeActiveProvider() else {
+            openSettingsAction?()
+            return
+        }
+        orchestrator.transform(with: scenario, provider: provider)
+    }
+
     // MARK: - Auto-dismiss after successful transformation
 
     private func observeCompletionForAutoDismiss() {
         completionObserver?.cancel()
-        completionObserver = Task { [weak self] in
+        // Run explicitly on the main actor so all orchestrator and window accesses
+        // are direct — no MainActor.run hops required.
+        completionObserver = Task { @MainActor [weak self] in
             guard let self else { return }
             var wasTransforming = false
             // Once we enter preview the auto-dismiss logic is disabled:
             // the overlay's Replace/Discard buttons take responsibility for hiding.
             var enteredPreview = false
+            var lastRevisionDepth = -1
+
             while !Task.isCancelled {
-                let currentState = await MainActor.run { self.orchestrator.state }
-                if currentState.isTransforming {
-                    wasTransforming = true
-                }
-                if currentState.isPreview {
+                let state = orchestrator.state
+                let depth = orchestrator.revisionDepth
+
+                if state.isTransforming { wasTransforming = true }
+
+                if state.isPreview {
                     enteredPreview = true
-                    // Resize the panel now that the preview content is rendered.
-                    await MainActor.run { self.resizeToFit() }
+                    if depth != lastRevisionDepth {
+                        lastRevisionDepth = depth
+                        resizeToFit()
+                    }
                 }
+
                 // Auto-dismiss only when going transforming → idle without a preview step.
-                if wasTransforming, !enteredPreview, case .idle = currentState {
-                    await MainActor.run { self.hide() }
+                if wasTransforming, !enteredPreview, case .idle = state {
+                    hide()
                     return
                 }
-                try? await Task.sleep(for: .milliseconds(100))
+
+                // The one-shot paste path calls orderOut on the panel so ⌘V reaches
+                // the target app. If the paste then fails, re-show the error panel.
+                if state.isFailed, let w = window, !w.isVisible {
+                    w.orderFrontRegardless()
+                    w.makeKey()
+                    resizeToFit()
+                }
+
+                // Suspend until orchestrator state or revisionDepth actually changes.
+                // withObservationTracking is push-based: the main actor is untouched
+                // during idle periods (e.g. while the user drags another window).
+                // The old 100 ms sleep-poll caused ~30 main-actor hops per second,
+                // producing input latency and frame drops during drag operations.
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    withObservationTracking {
+                        _ = self.orchestrator.state
+                        _ = self.orchestrator.revisionDepth
+                    } onChange: {
+                        continuation.resume()
+                    }
+                }
+                // One yield after resumption so Task cancellation (from hide()) can
+                // be detected before the next loop iteration reads orchestrator state.
+                await Task.yield()
             }
         }
     }

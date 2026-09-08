@@ -43,19 +43,30 @@ struct MenuBarView: View {
             Button("Cancel") { orchestrator.cancel() }
             Divider()
         case .preview(let name, _, let result):
-            Text("\(name) — Preview")
+            // Revisions are overlay-only (a text field inside NSMenu is awkward).
+            // The menu bar offers Replace / Retry / Cancel on the current result.
+            let depthLabel = orchestrator.revisionDepth > 0
+                ? "\(name) — Revision \(orchestrator.revisionDepth)"
+                : "\(name) — Preview"
+            Text(depthLabel)
                 .foregroundStyle(.secondary)
             Text(result)
                 .lineLimit(5)
                 .font(.caption)
                 .foregroundStyle(.primary)
             Button("Replace") { orchestrator.commit() }
+            if orchestrator.canGoBack {
+                Button("Undo Revision") { orchestrator.back() }
+            }
             Button("Discard") { orchestrator.cancel() }
             Divider()
         case .failed(let error):
             Text(error.localizedDescription)
                 .lineLimit(3)
                 .foregroundStyle(.red)
+            if orchestrator.state.isRetryable {
+                Button("Retry") { orchestrator.retryLast() }
+            }
             Button("Dismiss") { orchestrator.cancel() }
             Divider()
         }

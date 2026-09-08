@@ -2,6 +2,15 @@ import AppKit
 import SwiftUI
 import SwiftData
 
+// MARK: - Keyboard navigation state
+
+/// Tracks which row is keyboard-highlighted in the scenario list.
+/// Owned by `BlitzOverlayPresenter`; injected into the view via `.environment`.
+@Observable
+final class OverlayNavigationState {
+    var highlightedIndex: Int = 0
+}
+
 // MARK: - Brand colors
 
 private extension Color {
@@ -30,11 +39,15 @@ struct BlitzOverlayView: View {
     @Environment(ScenarioStore.self) private var scenarioStore
     @Environment(TransformationOrchestrator.self) private var orchestrator
     @Environment(ProviderStore.self) private var providerStore
+    @Environment(OverlayNavigationState.self) private var navigationState
 
     let onDismiss: () -> Void
     let onOpenSettings: () -> Void
     /// Called when the view's content changes size so the hosting panel can resize.
     let onNeedsResize: () -> Void
+
+    @State private var revisionText: String = ""
+    @FocusState private var revisionFieldFocused: Bool
 
     init(
         onDismiss: @escaping () -> Void,
@@ -51,29 +64,26 @@ struct BlitzOverlayView: View {
             header
             content
         }
-        .frame(width: 240)
+        .frame(width: 280)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.blitzBlue.opacity(0.6), .blitzSkyBlue.opacity(0.3)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: Color.blitzBlue.opacity(0.18), radius: 20, x: 0, y: 6)
-        .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 2)
         .onExitCommand {
-            if orchestrator.state.isTransforming { orchestrator.cancel() }
-            onDismiss()
+            if orchestrator.state.isTransforming {
+                orchestrator.cancel()
+                // If this was a revision cancel, orchestrator.cancel() restores to .preview.
+                // Only dismiss if we actually went to idle (original transform cancel).
+                if !orchestrator.state.isPreview { onDismiss() }
+            } else {
+                orchestrator.cancel()
+                onDismiss()
+            }
         }
-        // Ask the panel to resize whenever we enter the preview state.
+        // Resize panel whenever we enter or exit preview, or revision depth changes.
         .onChange(of: orchestrator.state.isPreview) { _, isPreview in
             if isPreview { onNeedsResize() }
+        }
+        .onChange(of: orchestrator.revisionDepth) { _, _ in
+            if orchestrator.state.isPreview { onNeedsResize() }
         }
     }
 
@@ -123,18 +133,9 @@ struct BlitzOverlayView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+            // Dragging is handled natively by BlitzOverlayWindow.sendEvent
+            // via performWindowDrag — no SwiftUI gesture needed here.
         )
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.blitzBlue.opacity(0.25), Color.blitzSkyBlue.opacity(0.1)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: 0.5)
-        }
     }
 
     // MARK: - Content
@@ -165,8 +166,8 @@ struct BlitzOverlayView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
             } else {
-                ForEach(enabled) { scenario in
-                    scenarioRow(scenario)
+                ForEach(enabled.indices, id: \.self) { index in
+                    scenarioRow(enabled[index], index: index)
                 }
             }
 
@@ -188,18 +189,36 @@ struct BlitzOverlayView: View {
             .padding(.vertical, 8)
         }
         .padding(.vertical, 6)
+        .onAppear {
+            navigationState.highlightedIndex = 0
+        }
     }
 
-    private func scenarioRow(_ scenario: Scenario) -> some View {
-        Button {
+    private func scenarioRow(_ scenario: Scenario, index: Int) -> some View {
+        let isHighlighted = navigationState.highlightedIndex == index
+        return Button {
             triggerTransformation(for: scenario)
         } label: {
-            Text(scenario.name)
-                .font(.callout)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(spacing: 4) {
+                Group {
+                    if index < 9 {
+                        Text("\(index + 1)")
+                            .monospacedDigit()
+                    } else {
+                        Color.clear
+                    }
+                }
+                .font(.system(size: 10, weight: .regular))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12, alignment: .trailing)
+
+                Text(scenario.name)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
         }
-        .buttonStyle(BlitzRowButtonStyle())
+        .buttonStyle(BlitzRowButtonStyle(isHighlighted: isHighlighted))
         .padding(.horizontal, 6)
     }
 
@@ -235,6 +254,7 @@ struct BlitzOverlayView: View {
 
             Button("Cancel") {
                 orchestrator.cancel()
+                if !orchestrator.state.isPreview { onDismiss() }
             }
             .buttonStyle(BlitzOutlineButtonStyle())
         }
@@ -246,21 +266,54 @@ struct BlitzOverlayView: View {
 
     private func previewContent(scenarioName: String, result: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Header row: scenario name / revision indicator + optional Back button
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color.blitzBlue)
-                Text(scenarioName)
-                    .font(.callout)
-                    .fontWeight(.medium)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blitzBlue, .blitzSkyBlue],
-                            startPoint: .leading,
-                            endPoint: .trailing
+
+                if orchestrator.revisionDepth > 0 {
+                    Text("Revision \(orchestrator.revisionDepth)")
+                        .font(.callout)
+                        .fontWeight(.medium)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.blitzBlue, .blitzSkyBlue],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
-                    )
+                } else {
+                    Text(scenarioName)
+                        .font(.callout)
+                        .fontWeight(.medium)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.blitzBlue, .blitzSkyBlue],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                }
+
+                Spacer()
+
+                if orchestrator.canGoBack {
+                    Button {
+                        orchestrator.back()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "chevron.left")
+                                .imageScale(.small)
+                            Text("Back")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
+            // Result text
             ScrollView {
                 Text(result)
                     .font(.callout)
@@ -275,6 +328,38 @@ struct BlitzOverlayView: View {
                     .strokeBorder(.secondary.opacity(0.15), lineWidth: 0.5)
             )
 
+            // Revision input field
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    TextField("Revise… (e.g. make it shorter)", text: $revisionText)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                        .focused($revisionFieldFocused)
+                        .onSubmit { submitRevision() }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(.secondary.opacity(0.25), lineWidth: 0.5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(.secondary.opacity(0.04))
+                                )
+                        )
+
+                    Button("Revise") { submitRevision() }
+                        .buttonStyle(BlitzOutlineButtonStyle())
+                        .disabled(revisionText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                // Give the text field focus automatically when preview appears.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    revisionFieldFocused = true
+                }
+            }
+
+            // Action row
             HStack(spacing: 8) {
                 Button("Replace") {
                     orchestrator.commit()
@@ -304,6 +389,10 @@ struct BlitzOverlayView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
+        .onChange(of: orchestrator.revisionDepth) { _, _ in
+            // Clear the revision field whenever we step into a new revision depth.
+            revisionText = ""
+        }
     }
 
     // MARK: - Failed
@@ -323,11 +412,20 @@ struct BlitzOverlayView: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Dismiss") {
-                orchestrator.cancel()
-                onDismiss()
+            HStack(spacing: 8) {
+                if orchestrator.state.isRetryable {
+                    Button("Retry") {
+                        orchestrator.retryLast()
+                    }
+                    .buttonStyle(BlitzPrimaryButtonStyle())
+                }
+
+                Button("Dismiss") {
+                    orchestrator.cancel()
+                    onDismiss()
+                }
+                .buttonStyle(BlitzOutlineButtonStyle())
             }
-            .buttonStyle(BlitzOutlineButtonStyle())
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
@@ -342,11 +440,24 @@ struct BlitzOverlayView: View {
         }
         orchestrator.transform(with: scenario, provider: provider)
     }
+
+    private func submitRevision() {
+        let trimmed = revisionText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        guard let provider = providerStore.makeActiveProvider() else {
+            onOpenSettings()
+            return
+        }
+        revisionText = ""
+        orchestrator.revise(followUp: trimmed, provider: provider)
+    }
 }
 
 // MARK: - Button styles
 
 private struct BlitzRowButtonStyle: ButtonStyle {
+    var isHighlighted: Bool = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, 8)
@@ -354,7 +465,7 @@ private struct BlitzRowButtonStyle: ButtonStyle {
             .background(
                 RoundedRectangle(cornerRadius: 7)
                     .fill(
-                        configuration.isPressed
+                        (configuration.isPressed || isHighlighted)
                             ? LinearGradient(
                                 colors: [Color.blitzBlue.opacity(0.15), Color.blitzSkyBlue.opacity(0.1)],
                                 startPoint: .topLeading,

@@ -13,6 +13,9 @@ struct SettingsView: View {
 
             ProvidersSettingsView()
                 .tabItem { Label("Providers", systemImage: "cpu") }
+
+            HistorySettingsView()
+                .tabItem { Label("History", systemImage: "clock") }
         }
         .frame(width: 520, height: 460)
     }

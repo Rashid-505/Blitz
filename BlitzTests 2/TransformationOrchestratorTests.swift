@@ -38,8 +38,18 @@ final class MockAIProvider: AIProvider {
     let displayName = "Mock"
     var transformedText: String = "Transformed text."
     var errorToThrow: Error?
+    /// Set to true to make transform() hang until the task is cancelled.
+    var shouldHang: Bool = false
+    /// Records the last text and instruction passed to transform().
+    var lastReceivedText: String?
+    var lastReceivedInstruction: String?
 
     func transform(text: String, instruction: String) async throws -> String {
+        lastReceivedText = text
+        lastReceivedInstruction = instruction
+        if shouldHang {
+            try await Task.sleep(for: .seconds(60))
+        }
         if let error = errorToThrow { throw error }
         return transformedText
     }
@@ -272,7 +282,6 @@ struct TransformationOrchestratorTests {
         orchestrator.transform(with: scenario, provider: provider)
         await orchestrator.currentTask?.value
 
-        // Confirm we're in preview before committing.
         guard case .preview = orchestrator.state else {
             Issue.record("Expected .preview state before commit")
             return
@@ -339,7 +348,6 @@ struct TransformationOrchestratorTests {
         let replacement = MockTextReplacementService()
         let orchestrator = makeOrchestrator(replacement: replacement)
 
-        // State is .idle — commit should be a no-op.
         orchestrator.commit()
         await orchestrator.currentTask?.value
 
@@ -347,5 +355,201 @@ struct TransformationOrchestratorTests {
             Issue.record("Expected state to remain .idle after no-op commit()")
         }
         #expect(replacement.replacedWith == nil)
+    }
+
+    // MARK: Retry tests
+
+    @Test("retryLast() re-invokes the provider and succeeds when the mock stops throwing")
+    func retrySucceedsAfterClearingError() async throws {
+        let provider = MockAIProvider()
+        provider.errorToThrow = AIError.invalidAPIKey
+
+        let orchestrator = makeOrchestrator(previewEnabled: false)
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        guard case .failed = orchestrator.state else {
+            Issue.record("Expected .failed after initial provider error")
+            return
+        }
+        #expect(orchestrator.state.isRetryable)
+
+        provider.errorToThrow = nil
+        provider.transformedText = "Retry succeeded."
+        orchestrator.retryLast()
+        await orchestrator.currentTask?.value
+
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected .idle after successful retry, got \(orchestrator.state)")
+        }
+    }
+
+    @Test("retryLast() before any transform is a no-op")
+    func retryLastBeforeTransformIsNoOp() async throws {
+        let orchestrator = makeOrchestrator()
+
+        orchestrator.retryLast()
+
+        #expect(orchestrator.currentTask == nil)
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected state to remain .idle, got \(orchestrator.state)")
+        }
+    }
+
+    @Test("Permission-denied failure is not marked retryable")
+    func permissionDeniedNotRetryable() async throws {
+        let selection = MockTextSelectionService()
+        selection.errorToThrow = TextServiceError.accessibilityPermissionDenied
+
+        let orchestrator = makeOrchestrator(selection: selection)
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: MockAIProvider())
+        await orchestrator.currentTask?.value
+
+        guard case .failed = orchestrator.state else {
+            Issue.record("Expected .failed after permission denied")
+            return
+        }
+        #expect(!orchestrator.state.isRetryable)
+    }
+
+    // MARK: Revision tests
+
+    @Test("Revision sends the previous result as input text, not the original selection")
+    func revisionUsesCurrentResult() async throws {
+        let selection = MockTextSelectionService()
+        selection.textToReturn = "Original selection."
+        let provider = MockAIProvider()
+        provider.transformedText = "First result."
+
+        let orchestrator = makeOrchestrator(selection: selection, previewEnabled: true)
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        guard case .preview(_, _, let result) = orchestrator.state else {
+            Issue.record("Expected .preview after transform, got \(orchestrator.state)")
+            return
+        }
+        #expect(result == "First result.")
+
+        provider.transformedText = "Revised result."
+        orchestrator.revise(followUp: "make it shorter", provider: provider)
+        await orchestrator.currentTask?.value
+
+        #expect(provider.lastReceivedText == "First result.", "Revision must use the current result, not the original selection")
+        guard case .preview(_, _, let revised) = orchestrator.state else {
+            Issue.record("Expected .preview after revision, got \(orchestrator.state)")
+            return
+        }
+        #expect(revised == "Revised result.")
+    }
+
+    @Test("commit() after two revisions writes the latest result exactly once")
+    func commitAfterTwoRevisions() async throws {
+        let replacement = MockTextReplacementService()
+        let provider = MockAIProvider()
+        provider.transformedText = "Result 1."
+
+        let orchestrator = makeOrchestrator(replacement: replacement, previewEnabled: true)
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        provider.transformedText = "Result 2."
+        orchestrator.revise(followUp: "shorter", provider: provider)
+        await orchestrator.currentTask?.value
+
+        provider.transformedText = "Result 3."
+        orchestrator.revise(followUp: "punchier", provider: provider)
+        await orchestrator.currentTask?.value
+
+        guard case .preview(_, _, let result) = orchestrator.state else {
+            Issue.record("Expected .preview before commit, got \(orchestrator.state)")
+            return
+        }
+        #expect(result == "Result 3.")
+        #expect(orchestrator.revisionDepth == 2)
+
+        orchestrator.commit()
+        await orchestrator.currentTask?.value
+
+        #expect(replacement.replacedWith == "Result 3.")
+        if case .idle = orchestrator.state { } else {
+            Issue.record("Expected .idle after commit, got \(orchestrator.state)")
+        }
+    }
+
+    @Test("back() restores the previous result without writing anything")
+    func backRestoresPreviousResult() async throws {
+        let replacement = MockTextReplacementService()
+        let provider = MockAIProvider()
+        provider.transformedText = "First result."
+
+        let orchestrator = makeOrchestrator(replacement: replacement, previewEnabled: true)
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        provider.transformedText = "Revised result."
+        orchestrator.revise(followUp: "shorter", provider: provider)
+        await orchestrator.currentTask?.value
+
+        guard case .preview(_, _, let revised) = orchestrator.state else {
+            Issue.record("Expected .preview after revision, got \(orchestrator.state)")
+            return
+        }
+        #expect(revised == "Revised result.")
+        #expect(orchestrator.revisionDepth == 1)
+        #expect(orchestrator.canGoBack)
+
+        orchestrator.back()
+
+        guard case .preview(_, _, let restored) = orchestrator.state else {
+            Issue.record("Expected .preview after back(), got \(orchestrator.state)")
+            return
+        }
+        #expect(restored == "First result.")
+        #expect(orchestrator.revisionDepth == 0)
+        #expect(!orchestrator.canGoBack)
+        #expect(replacement.replacedWith == nil)
+    }
+
+    @Test("Cancelling an in-flight revision restores the previous preview result")
+    func cancelRevisionRestoresPreview() async throws {
+        let provider = MockAIProvider()
+        provider.transformedText = "First result."
+
+        let orchestrator = makeOrchestrator(previewEnabled: true)
+        let scenario = try makeScenario()
+
+        orchestrator.transform(with: scenario, provider: provider)
+        await orchestrator.currentTask?.value
+
+        guard case .preview(_, _, let initial) = orchestrator.state else {
+            Issue.record("Expected .preview after transform, got \(orchestrator.state)")
+            return
+        }
+        #expect(initial == "First result.")
+
+        // Start a hanging revision so we can cancel it mid-flight.
+        provider.shouldHang = true
+        orchestrator.revise(followUp: "shorter", provider: provider)
+        let revisionTask = orchestrator.currentTask
+        // cancel() runs synchronously before the task body executes on @MainActor.
+        orchestrator.cancel()
+        await revisionTask?.value
+
+        guard case .preview(_, _, let restored) = orchestrator.state else {
+            Issue.record("Expected .preview after cancelling revision, got \(orchestrator.state)")
+            return
+        }
+        #expect(restored == "First result.")
     }
 }
