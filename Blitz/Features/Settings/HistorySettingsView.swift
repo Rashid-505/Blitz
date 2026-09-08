@@ -61,17 +61,25 @@ private struct HistoryEntryRow: View {
     @State private var didCopy = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Text(entry.scenarioName)
-                    .fontWeight(.medium)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(entry.scenarioName)
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text(entry.date, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                Spacer()
-
-                Text(entry.date, style: .relative)
+                Text(entry.resultText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
+            }
 
+            HStack(spacing: 4) {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(entry.resultText, forType: .string)
@@ -83,7 +91,8 @@ private struct HistoryEntryRow: View {
                 } label: {
                     Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                         .foregroundStyle(didCopy ? .green : .secondary)
-                        .imageScale(.small)
+                        .imageScale(.medium)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
                 .help("Copy result")
@@ -91,17 +100,12 @@ private struct HistoryEntryRow: View {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .foregroundStyle(.red)
-                        .imageScale(.small)
+                        .imageScale(.medium)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
                 .help("Delete entry")
             }
-
-            Text(entry.resultText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .truncationMode(.tail)
         }
         .padding(.vertical, 2)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

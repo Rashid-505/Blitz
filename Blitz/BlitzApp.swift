@@ -14,6 +14,7 @@ struct BlitzApp: App {
     private let orchestrator: TransformationOrchestrator
     private let shortcutManager: GlobalShortcutManager
     private let overlayPresenter: BlitzOverlayPresenter
+    private let updateChecker = UpdateChecker()
 
     init() {
         do {
@@ -79,6 +80,7 @@ struct BlitzApp: App {
                 .environment(scenarioStore)
                 .environment(providerStore)
                 .environment(orchestrator)
+                .environment(updateChecker)
         }
         .menuBarExtraStyle(.menu)
         .modelContainer(sharedContainer)
@@ -89,6 +91,7 @@ struct BlitzApp: App {
                 .environment(providerStore)
                 .environment(previewSettings)
                 .environment(historyStore)
+                .environment(updateChecker)
         }
         .modelContainer(sharedContainer)
     }

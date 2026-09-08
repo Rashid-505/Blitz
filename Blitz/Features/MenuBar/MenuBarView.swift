@@ -6,6 +6,7 @@ struct MenuBarView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(ProviderStore.self) private var providerStore
     @Environment(TransformationOrchestrator.self) private var orchestrator
+    @Environment(UpdateChecker.self) private var updateChecker
 
     var body: some View {
         statusSection
@@ -23,6 +24,8 @@ struct MenuBarView: View {
             NSApp.activate()
             NSApp.orderFrontStandardAboutPanel(nil)
         }
+
+        updateSection
 
         Divider()
 
@@ -94,5 +97,36 @@ struct MenuBarView: View {
             return
         }
         orchestrator.transform(with: scenario, provider: provider)
+    }
+
+    // MARK: - Update section
+
+    @ViewBuilder
+    private var updateSection: some View {
+        switch updateChecker.state {
+        case .idle, .upToDate:
+            Button("Check for Updates…") {
+                Task { await updateChecker.checkForUpdates() }
+            }
+        case .checking:
+            Text("Checking for updates…")
+                .foregroundStyle(.secondary)
+        case .available(let release):
+            Text("Blitz \(release.version) is available")
+                .foregroundStyle(.secondary)
+            Button("Download & Install") {
+                Task { await updateChecker.downloadAndInstall(release) }
+            }
+            Button("View Release Notes…") {
+                updateChecker.openReleasePage(release)
+            }
+        case .downloading(let progress):
+            Text(progress < 1 ? "Downloading… \(Int(progress * 100))%" : "Installing…")
+                .foregroundStyle(.secondary)
+        case .error:
+            Button("Check for Updates…") {
+                Task { await updateChecker.checkForUpdates() }
+            }
+        }
     }
 }
