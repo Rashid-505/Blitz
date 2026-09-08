@@ -56,10 +56,6 @@ struct BlitzApp: App {
             BlitzApp.bringSettingsToFront()
         }
 
-        // Give the AppDelegate access to the provider store so NSServices
-        // handlers can reach the active provider without duplicating state.
-        appDelegate.providerStore = providerStore
-
         // Wire the global shortcut → overlay. Capturing strongly is intentional;
         // both objects live for the app's lifetime and there is no retain cycle.
         shortcutManager.onActivate = {
