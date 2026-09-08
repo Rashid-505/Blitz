@@ -13,7 +13,7 @@ final class UpdateChecker {
 
     // MARK: - Configuration
 
-    static let repoOwner = "rashidhuseynov"
+    static let repoOwner = "Rashid-505"
     static let repoName  = "Blitz"
 
     // MARK: - State
